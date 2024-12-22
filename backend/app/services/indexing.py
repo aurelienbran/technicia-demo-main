@@ -32,6 +32,12 @@ class IndexingService:
             
             async for chunk, page_num in self._stream_pdf_chunks(file_path):
                 try:
+                    # Vérifier si le chunk est déjà indexé
+                    chunk_hash = self._generate_hash(chunk)
+                    if await self._is_chunk_indexed(chunk_hash):
+                        logger.debug(f"Chunk already indexed, skipping: {chunk_hash}")
+                        continue
+
                     # Générer l'embedding pour le chunk
                     embedding = await self.embedding.get_embedding(chunk)
                     
@@ -41,7 +47,7 @@ class IndexingService:
                         "page_number": page_num,
                         "chunk_index": chunks_processed,
                         "text": chunk,
-                        "chunk_hash": self._generate_hash(chunk),
+                        "chunk_hash": chunk_hash,
                         "indexed_at": datetime.utcnow().isoformat()
                     }
                     
@@ -52,6 +58,7 @@ class IndexingService:
                     )
                     
                     chunks_processed += 1
+                    logger.debug(f"Processed chunk {chunks_processed} from page {page_num}")
                     
                     # Rate limiting
                     await asyncio.sleep(self.rate_limit_delay)
@@ -60,7 +67,7 @@ class IndexingService:
                     logger.error(f"Error processing chunk {chunks_processed} of {file_path}: {str(e)}")
                     continue
 
-            logger.info(f"Successfully indexed {file_path}")
+            logger.info(f"Successfully indexed {file_path}: {chunks_processed} chunks processed")
             return {
                 "status": "success",
                 "file": file_path,
@@ -99,51 +106,63 @@ class IndexingService:
             logger.error(f"Error getting PDF metadata for {file_path}: {str(e)}")
             raise
 
-    async def _stream_pdf_chunks(self, file_path: str) -> AsyncGenerator[tuple[str, int], None]:
+    async def _is_chunk_indexed(self, chunk_hash: str) -> bool:
         """
-        Génère les chunks de texte d'un PDF de manière asynchrone.
+        Vérifie si un chunk est déjà indexé dans Qdrant.
         """
         try:
+            results = await self.vector_store.search_by_hash(chunk_hash)
+            return len(results) > 0
+        except Exception as e:
+            logger.error(f"Error checking chunk hash {chunk_hash}: {str(e)}")
+            return False
+
+    async def _stream_pdf_chunks(self, file_path: str) -> AsyncGenerator[tuple[str, int], None]:
+        """
+        Génère les chunks de texte d'un PDF de manière asynchrone et efficace.
+        """
+        doc = None
+        try:
             doc = fitz.open(file_path)
-            
             current_chunk = []
             current_length = 0
-            current_page = 1
             
             for page_num in range(len(doc)):
                 page = doc[page_num]
-                text = page.get_text()
-                words = text.split()
+                # Extraction du texte par blocs pour une meilleure performance
+                blocks = page.get_text("blocks")
                 
-                for word in words:
-                    current_chunk.append(word)
-                    current_length += len(word) + 1
+                for block in blocks:
+                    words = block[4].split()  # Le texte est dans block[4]
                     
-                    if current_length >= self.chunk_size:
-                        chunk_text = " ".join(current_chunk)
-                        # Garder une partie pour le chevauchement
-                        overlap_words = current_chunk[-self.chunk_overlap:]
-                        current_chunk = overlap_words
-                        current_length = sum(len(word) + 1 for word in overlap_words)
+                    for word in words:
+                        current_chunk.append(word)
+                        current_length += len(word) + 1
                         
-                        yield chunk_text, current_page
-                
-                current_page += 1
+                        if current_length >= self.chunk_size:
+                            chunk_text = " ".join(current_chunk)
+                            # Garder une partie pour le chevauchement
+                            overlap_words = current_chunk[-self.chunk_overlap:]
+                            current_chunk = overlap_words
+                            current_length = sum(len(word) + 1 for word in overlap_words)
+                            
+                            yield chunk_text, page_num + 1
             
             # Retourner le dernier chunk s'il en reste
             if current_chunk:
                 chunk_text = " ".join(current_chunk)
-                yield chunk_text, current_page
+                yield chunk_text, page_num + 1
                 
-            doc.close()
-            
         except Exception as e:
             logger.error(f"Error streaming PDF {file_path}: {str(e)}")
             raise
+        finally:
+            if doc:
+                doc.close()
 
     async def index_directory(self, directory_path: str) -> List[Dict]:
         """
-        Indexe tous les PDFs dans un répertoire de manière séquentielle.
+        Indexe tous les PDFs dans un répertoire de manière séquentielle avec gestion de la mémoire.
         """
         try:
             pdf_files = list(Path(directory_path).glob("**/*.pdf"))
@@ -152,9 +171,10 @@ class IndexingService:
             results = []
             for pdf_file in pdf_files:
                 try:
+                    logger.info(f"Processing file: {pdf_file}")
                     result = await self.index_document(str(pdf_file))
                     results.append(result)
-                    # Petit délai entre chaque fichier pour éviter la surcharge
+                    # Délai entre les fichiers pour éviter la surcharge
                     await asyncio.sleep(1)
                 except Exception as e:
                     logger.error(f"Failed to index {pdf_file}: {str(e)}")
@@ -186,7 +206,7 @@ class IndexingService:
         score_threshold: float = 0.7
     ) -> Dict:
         """
-        Recherche dans les documents indexés.
+        Recherche dans les documents indexés de manière optimisée.
         """
         try:
             # Générer l'embedding pour la requête
@@ -199,10 +219,17 @@ class IndexingService:
                 score_threshold=score_threshold
             )
 
-            # Extraire les contextes pertinents
-            contexts = [result["payload"]["text"] for result in results]
+            # Extraire et filtrer les contextes pertinents
+            contexts = []
+            seen_hashes = set()
+            
+            for result in results:
+                chunk_hash = result["payload"].get("chunk_hash")
+                if chunk_hash and chunk_hash not in seen_hashes:
+                    contexts.append(result["payload"]["text"])
+                    seen_hashes.add(chunk_hash)
 
-            # Obtenir une réponse de Claude avec le contexte
+            # Obtenir une réponse de Claude avec le contexte optimisé
             context_text = "\n---\n".join(contexts)
             answer = await self.claude.get_response(
                 query=query,
