@@ -14,22 +14,9 @@ class SystemTest:
         self.base_url = base_url
         self.tests = [
             ("Health Check", self.test_health),
-            ("File Indexing", self.test_index_file),
-            ("Query Processing", self.test_query)
+            ("Chat Query", self.test_chat_query)
         ]
-        self.test_file = None
-
-    async def setup(self):
-        """Create a test PDF file if none exists"""
-        docs_dir = Path("backend/docs")
-        docs_dir.mkdir(exist_ok=True)
-        
-        self.test_file = docs_dir / "test.pdf"
-        if not self.test_file.exists():
-            # Create a simple test PDF
-            with open(self.test_file, "w") as f:
-                f.write("Test content for PDF")
-            logger.info(f"Created test file at {self.test_file}")
+        self.test_text = "How does a hydraulic system work?"
 
     async def run_test(self, test_name, test_func):
         try:
@@ -44,42 +31,32 @@ class SystemTest:
             return False
 
     async def test_health(self):
+        """Test the health check endpoint"""
         async with httpx.AsyncClient() as client:
-            response = await client.get(f"{self.base_url}/ping")
+            response = await client.get(f"{self.base_url}/")
             assert response.status_code == 200
             logger.info("Health check data:")
             logger.info(response.json())
 
-    async def test_index_file(self):
-        if not self.test_file or not self.test_file.exists():
-            await self.setup()
-            
-        async with httpx.AsyncClient() as client:
-            with open(self.test_file, "rb") as f:
-                files = {"file": ("test.pdf", f, "application/pdf")}
-                response = await client.post(
-                    f"{self.base_url}/api/index/file",
-                    files=files
-                )
-                assert response.status_code == 200
-                logger.info(f"File indexed successfully: {self.test_file}")
-
-    async def test_query(self):
+    async def test_chat_query(self):
+        """Test the chat query endpoint"""
         async with httpx.AsyncClient() as client:
             data = {
-                "text": "What does the document discuss?",
+                "text": self.test_text,
                 "max_tokens": 1000,
                 "temperature": 0.7
             }
-            response = await client.post(f"{self.base_url}/api/query", json=data)
+            response = await client.post(
+                f"{self.base_url}/api/chat",
+                json=data
+            )
             assert response.status_code == 200
-            logger.info("Query processed successfully")
+            logger.info("Chat query response received successfully")
+            logger.info(f"Query: {self.test_text}")
+            logger.info(f"Response: {response.json()}")
 
     async def run_all_tests(self):
         logger.info("Starting system tests...")
-        
-        # Ensure test file exists
-        await self.setup()
         
         results = {
             "total": len(self.tests),
