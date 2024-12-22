@@ -7,6 +7,9 @@ from pydantic import BaseModel
 class DirectoryRequest(BaseModel):
     directory_path: str
 
+class SearchRequest(BaseModel):
+    query: str
+
 router = APIRouter(prefix='/api/pdf')
 pdf_service = PDFService()
 
@@ -24,9 +27,7 @@ async def upload_pdf(file: UploadFile = File(...)):
 async def upload_directory(request: DirectoryRequest):
     """Upload et indexe tous les PDFs d'un dossier"""
     try:
-        # Convertit le chemin en utilisant pathlib
         path = Path(request.directory_path)
-        # Convertit en chemin absolu normalisé
         abs_path = str(path.absolute())
         print(f"Processing directory: {abs_path}")
         
@@ -40,6 +41,21 @@ async def upload_directory(request: DirectoryRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing directory: {str(e)}")
+
+@router.post('/search')
+def search_pdfs(request: SearchRequest):
+    """Recherche dans le contenu des PDFs indexés"""
+    if len(request.query.strip()) < 3:
+        raise HTTPException(
+            status_code=400,
+            detail="Le terme de recherche doit contenir au moins 3 caractères"
+        )
+    
+    results = pdf_service.search_content(request.query)
+    return {
+        'query': request.query,
+        'results': results
+    }
 
 @router.get('/files', response_model=List[str])
 def list_files():
