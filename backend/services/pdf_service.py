@@ -31,6 +31,32 @@ class PDFService:
             json.dump(self.index, f, ensure_ascii=False, indent=2)
         print(f"Index sauvegardé avec {len(self.index)} documents")
         
+    async def process_directory(self, directory_path: str) -> List[Dict]:
+        """Process all PDFs in a directory"""
+        results = []
+        source_dir = WindowsPath(directory_path)
+        
+        if not source_dir.exists() or not source_dir.is_dir():
+            raise ValueError(f"Le dossier {str(source_dir)} n'existe pas ou n'est pas un dossier")
+            
+        for file_path in source_dir.glob('**/*.pdf'):
+            try:
+                print(f"Traitement du fichier : {file_path}")
+                content = file_path.read_bytes()
+                result = await self.process_pdf(content, file_path.name)
+                results.append(result)
+                
+            except Exception as e:
+                error_details = {
+                    'filename': file_path.name,
+                    'path': str(file_path),
+                    'error': str(e)
+                }
+                print(f"Erreur lors du traitement : {error_details}")
+                results.append(error_details)
+                
+        return results
+        
     async def process_pdf(self, file: bytes, filename: str) -> Dict:
         """Process and index a PDF file"""
         print(f"Traitement du fichier {filename}")
