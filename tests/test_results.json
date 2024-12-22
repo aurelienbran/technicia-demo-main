@@ -1,0 +1,25 @@
+{
+  "total_tests": 3,
+  "passed_tests": 0,
+  "failed_tests": 3,
+  "test_details": [
+    {
+      "name": "Health Check",
+      "status": "FAILED",
+      "execution_time": "30.32s",
+      "timestamp": "2024-12-21 15:22:52"
+    },
+    {
+      "name": "File Indexing",
+      "status": "FAILED",
+      "execution_time": "0.00s",
+      "timestamp": "2024-12-21 15:22:52"
+    },
+    {
+      "name": "Query Processing",
+      "status": "FAILED",
+      "execution_time": "30.26s",
+      "timestamp": "2024-12-21 15:23:22"
+    }
+  ]
+}

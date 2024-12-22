@@ -1,0 +1,126 @@
+2024-12-21 15:22:21,999 - system_test - INFO - Starting system tests...
+2024-12-21 15:22:52,316 - system_test - ERROR - Test 'Health Check' failed: 
+2024-12-21 15:22:52,316 - system_test - ERROR - 
+Traceback (most recent call last):
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpx\_transports\default.py", line 101, in map_httpcore_exceptions
+    yield
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpx\_transports\default.py", line 394, in handle_async_request
+    resp = await self._pool.handle_async_request(req)
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpcore\_async\connection_pool.py", line 256, in handle_async_request
+    raise exc from None
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpcore\_async\connection_pool.py", line 236, in handle_async_request
+    response = await connection.handle_async_request(
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpcore\_async\connection.py", line 103, in handle_async_request
+    return await self._connection.handle_async_request(request)
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpcore\_async\http11.py", line 136, in handle_async_request
+    raise exc
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpcore\_async\http11.py", line 106, in handle_async_request
+    ) = await self._receive_response_headers(**kwargs)
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpcore\_async\http11.py", line 177, in _receive_response_headers
+    event = await self._receive_event(timeout=timeout)
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpcore\_async\http11.py", line 217, in _receive_event
+    data = await self._network_stream.read(
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpcore\_backends\anyio.py", line 32, in read
+    with map_exceptions(exc_map):
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\lib\contextlib.py", line 153, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpcore\_exceptions.py", line 14, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore.ReadTimeout
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\tests\test_system.py", line 39, in run_test
+    await test_func()
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\tests\test_system.py", line 60, in test_health_check
+    response = await self.client.get(f"{self.base_url}/api/health")
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpx\_client.py", line 1768, in get
+    return await self.request(
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpx\_client.py", line 1540, in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpx\_client.py", line 1629, in send
+    response = await self._send_handling_auth(
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpx\_client.py", line 1657, in _send_handling_auth
+    response = await self._send_handling_redirects(
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpx\_client.py", line 1694, in _send_handling_redirects
+    response = await self._send_single_request(request)
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpx\_client.py", line 1730, in _send_single_request
+    response = await transport.handle_async_request(request)
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpx\_transports\default.py", line 393, in handle_async_request
+    with map_httpcore_exceptions():
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\lib\contextlib.py", line 153, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpx\_transports\default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.ReadTimeout
+2024-12-21 15:22:52,430 - system_test - ERROR - Test 'File Indexing' failed: [Errno 2] No such file or directory: 'docs\\Cahiers des charges technique V1.00.docx'
+2024-12-21 15:22:52,430 - system_test - ERROR - [Errno 2] No such file or directory: 'docs\\Cahiers des charges technique V1.00.docx'
+Traceback (most recent call last):
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\tests\test_system.py", line 39, in run_test
+    await test_func()
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\tests\test_system.py", line 70, in test_index_file
+    with open(pdf_path, "rb") as f:
+FileNotFoundError: [Errno 2] No such file or directory: 'docs\\Cahiers des charges technique V1.00.docx'
+2024-12-21 15:23:22,691 - system_test - ERROR - Test 'Query Processing' failed: 
+2024-12-21 15:23:22,911 - system_test - ERROR - 
+Traceback (most recent call last):
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpx\_transports\default.py", line 101, in map_httpcore_exceptions
+    yield
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpx\_transports\default.py", line 394, in handle_async_request
+    resp = await self._pool.handle_async_request(req)
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpcore\_async\connection_pool.py", line 256, in handle_async_request
+    raise exc from None
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpcore\_async\connection_pool.py", line 236, in handle_async_request
+    response = await connection.handle_async_request(
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpcore\_async\connection.py", line 103, in handle_async_request
+    return await self._connection.handle_async_request(request)
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpcore\_async\http11.py", line 136, in handle_async_request
+    raise exc
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpcore\_async\http11.py", line 106, in handle_async_request
+    ) = await self._receive_response_headers(**kwargs)
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpcore\_async\http11.py", line 177, in _receive_response_headers
+    event = await self._receive_event(timeout=timeout)
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpcore\_async\http11.py", line 217, in _receive_event
+    data = await self._network_stream.read(
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpcore\_backends\anyio.py", line 32, in read
+    with map_exceptions(exc_map):
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\lib\contextlib.py", line 153, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpcore\_exceptions.py", line 14, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore.ReadTimeout
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\tests\test_system.py", line 39, in run_test
+    await test_func()
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\tests\test_system.py", line 91, in test_query
+    response = await self.client.post(
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpx\_client.py", line 1859, in post
+    return await self.request(
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpx\_client.py", line 1540, in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpx\_client.py", line 1629, in send
+    response = await self._send_handling_auth(
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpx\_client.py", line 1657, in _send_handling_auth
+    response = await self._send_handling_redirects(
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpx\_client.py", line 1694, in _send_handling_redirects
+    response = await self._send_single_request(request)
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpx\_client.py", line 1730, in _send_single_request
+    response = await transport.handle_async_request(request)
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpx\_transports\default.py", line 393, in handle_async_request
+    with map_httpcore_exceptions():
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\lib\contextlib.py", line 153, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\venv\lib\site-packages\httpx\_transports\default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.ReadTimeout
+2024-12-21 15:23:22,923 - system_test - INFO - 
+=== Test Results ===
+2024-12-21 15:23:22,926 - system_test - INFO - Total Tests: 3
+2024-12-21 15:23:22,926 - system_test - INFO - Passed: 0
+2024-12-21 15:23:22,927 - system_test - INFO - Failed: 3
+2024-12-21 15:23:22,927 - system_test - INFO - ==================
+

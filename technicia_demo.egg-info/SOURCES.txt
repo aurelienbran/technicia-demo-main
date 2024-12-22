@@ -1,0 +1,6 @@
+setup.py
+technicia_demo.egg-info/PKG-INFO
+technicia_demo.egg-info/SOURCES.txt
+technicia_demo.egg-info/dependency_links.txt
+technicia_demo.egg-info/requires.txt
+technicia_demo.egg-info/top_level.txt

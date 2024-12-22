@@ -1,0 +1,41 @@
+2024-12-21 15:40:51,126 - technicia.vector_store - INFO - Vector store initialized with collection: technical_docs
+2024-12-21 15:40:51,833 - technicia.vector_store - INFO - Collection technical_docs created successfully
+2024-12-21 15:40:51,834 - technicia - INFO - Vector store initialized successfully
+2024-12-21 15:45:33,091 - technicia.vector_store - INFO - Vector store initialized with collection: technical_docs
+2024-12-21 15:45:33,136 - technicia.vector_store - INFO - Collection technical_docs already exists
+2024-12-21 15:45:33,136 - technicia - INFO - Vector store initialized successfully
+2024-12-21 15:45:33,221 - technicia.vector_store - ERROR - Error getting collection info: 'CollectionParams' object has no attribute 'vector_size'
+2024-12-21 15:45:33,223 - technicia.api - ERROR - Health check failed: 'CollectionParams' object has no attribute 'vector_size'
+2024-12-21 15:45:33,259 - technicia.vector_store - ERROR - Error getting collection info: 'CollectionParams' object has no attribute 'vector_size'
+2024-12-21 15:45:33,260 - technicia.api - ERROR - Health check failed: 'CollectionParams' object has no attribute 'vector_size'
+2024-12-21 15:45:36,028 - technicia.vector_store - INFO - Vector store initialized with collection: technical_docs
+2024-12-21 15:45:36,060 - technicia.vector_store - INFO - Collection technical_docs already exists
+2024-12-21 15:45:36,061 - technicia - INFO - Vector store initialized successfully
+2024-12-21 15:45:47,621 - technicia.claude - ERROR - Unexpected error calling Claude: object Message can't be used in 'await' expression
+2024-12-21 15:45:47,622 - technicia.indexing - ERROR - Error searching: object Message can't be used in 'await' expression
+2024-12-21 15:45:47,622 - technicia.api - ERROR - Error processing query: object Message can't be used in 'await' expression
+2024-12-21 15:46:21,157 - technicia - INFO - Shutting down API...
+2024-12-21 15:46:39,680 - technicia.vector_store - INFO - Vector store initialized with collection: technical_docs
+2024-12-21 15:46:39,702 - technicia.vector_store - INFO - Collection technical_docs already exists
+2024-12-21 15:46:39,702 - technicia - INFO - Vector store initialized successfully
+2024-12-21 15:46:43,378 - technicia.vector_store - ERROR - Error getting collection info: 'CollectionParams' object has no attribute 'vector_size'
+2024-12-21 15:46:43,379 - technicia.api - ERROR - Health check failed: 'CollectionParams' object has no attribute 'vector_size'
+2024-12-21 15:54:11,462 - technicia - INFO - Shutting down API...
+2024-12-21 15:54:11,510 - technicia - INFO - Shutting down API...
+2024-12-21 15:54:16,306 - technicia.vector_store - INFO - Vector store initialized with collection: technical_docs
+2024-12-21 15:54:16,317 - technicia.vector_store - INFO - Vector store initialized with collection: technical_docs
+2024-12-21 15:54:16,337 - technicia.vector_store - INFO - Collection technical_docs already exists
+2024-12-21 15:54:16,337 - technicia - INFO - Vector store initialized successfully
+2024-12-21 15:54:16,350 - technicia.vector_store - INFO - Collection technical_docs already exists
+2024-12-21 15:54:16,351 - technicia - INFO - Vector store initialized successfully
+2024-12-21 15:57:38,551 - technicia.indexing - INFO - Found 1 PDF files in C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\docs
+2024-12-21 15:59:41,407 - technicia.indexing - ERROR - Error processing PDF C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\docs\em.pdf: 
+2024-12-21 15:59:41,418 - technicia.indexing - ERROR - Error indexing document C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\docs\em.pdf: 
+2024-12-21 15:59:41,427 - technicia.indexing - ERROR - Failed to index C:\Users\aurel\Documents\Démonstrateur_TechnicIA\technicia-demo\backend\docs\em.pdf: 
+2024-12-21 16:23:05,903 - technicia - INFO - Shutting down API...
+2024-12-21 16:31:03,019 - technicia.vector_store - INFO - Vector store initialized with collection: technical_docs
+2024-12-21 16:31:03,146 - technicia.vector_store - INFO - Collection technical_docs already exists
+2024-12-21 16:31:03,146 - technicia - INFO - Vector store initialized successfully
+2024-12-21 16:39:29,979 - technicia.indexing - INFO - Processed PDF: C:\Users\aurel\AppData\Local\Temp\tmps9t7iz60.pdf, generated 4 chunks
+2024-12-21 16:39:31,047 - technicia.vector_store - INFO - Successfully added 4 vectors to collection
+2024-12-21 17:23:55,724 - technicia - INFO - Shutting down API...
