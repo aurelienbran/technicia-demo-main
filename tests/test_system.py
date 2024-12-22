@@ -42,12 +42,12 @@ class SystemTest:
         """Test the chat query endpoint"""
         async with httpx.AsyncClient() as client:
             data = {
-                "text": self.test_text,
-                "max_tokens": 1000,
-                "temperature": 0.7
+                "query": self.test_text,
+                "limit": 5,
+                "score_threshold": 0.7
             }
             response = await client.post(
-                f"{self.base_url}/api/chat",
+                f"{self.base_url}/api/query",
                 json=data
             )
             assert response.status_code == 200
