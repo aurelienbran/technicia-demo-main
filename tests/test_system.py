@@ -58,7 +58,7 @@ class SystemTest:
             with open(self.test_file, "rb") as f:
                 files = {"file": ("test.pdf", f, "application/pdf")}
                 response = await client.post(
-                    f"{self.base_url}/index/file",
+                    f"{self.base_url}/api/index/file",
                     files=files
                 )
                 assert response.status_code == 200
@@ -71,7 +71,7 @@ class SystemTest:
                 "max_tokens": 1000,
                 "temperature": 0.7
             }
-            response = await client.post(f"{self.base_url}/query", json=data)
+            response = await client.post(f"{self.base_url}/api/query", json=data)
             assert response.status_code == 200
             logger.info("Query processed successfully")
 
