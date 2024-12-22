@@ -20,6 +20,7 @@ class SystemTest:
 
     async def run_test(self, test_name, test_func):
         try:
+            logger.info(f"Starting test: {test_name}")
             start_time = time.time()
             await test_func()
             duration = time.time() - start_time
@@ -27,36 +28,54 @@ class SystemTest:
             return True
         except Exception as e:
             logger.error(f"Test '{test_name}' failed: {str(e)}")
-            logger.error(f"{e}")
+            logger.error(f"Error details: {type(e).__name__}")
             return False
 
     async def test_health(self):
         """Test the health check endpoint"""
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"{self.base_url}/")
-            assert response.status_code == 200
-            logger.info("Health check data:")
-            logger.info(response.json())
+        try:
+            logger.info(f"Sending GET request to {self.base_url}/")
+            async with httpx.AsyncClient() as client:
+                response = await client.get(f"{self.base_url}/")
+                response.raise_for_status()  # Raise exception for bad status codes
+                logger.info("Health check data:")
+                logger.info(response.json())
+        except httpx.ConnectError:
+            logger.error(f"Unable to connect to {self.base_url}. Is the server running?")
+            raise
+        except Exception as e:
+            logger.error(f"Health check failed: {str(e)}")
+            raise
 
     async def test_chat_query(self):
         """Test the chat query endpoint"""
-        async with httpx.AsyncClient() as client:
+        try:
             data = {
                 "query": self.test_text,
                 "limit": 5,
                 "score_threshold": 0.7
             }
-            response = await client.post(
-                f"{self.base_url}/api/query",
-                json=data
-            )
-            assert response.status_code == 200
-            logger.info("Chat query response received successfully")
-            logger.info(f"Query: {self.test_text}")
-            logger.info(f"Response: {response.json()}")
+            logger.info(f"Sending POST request to {self.base_url}/api/query")
+            logger.info(f"Request data: {data}")
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/api/query",
+                    json=data
+                )
+                response.raise_for_status()
+                logger.info("Chat query response received successfully")
+                logger.info(f"Query: {self.test_text}")
+                logger.info(f"Response: {response.json()}")
+        except httpx.ConnectError:
+            logger.error(f"Unable to connect to {self.base_url}/api/query. Is the server running?")
+            raise
+        except Exception as e:
+            logger.error(f"Chat query failed: {str(e)}")
+            raise
 
     async def run_all_tests(self):
         logger.info("Starting system tests...")
+        logger.info(f"Testing API at: {self.base_url}")
         
         results = {
             "total": len(self.tests),
