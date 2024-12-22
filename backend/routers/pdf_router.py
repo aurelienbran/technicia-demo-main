@@ -1,7 +1,11 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Body
 from typing import List
 from services.pdf_service import PDFService
-from pathlib import Path
+from pathlib import Path, WindowsPath
+from pydantic import BaseModel
+
+class DirectoryRequest(BaseModel):
+    directory_path: str
 
 router = APIRouter(prefix='/api/pdf')
 pdf_service = PDFService()
@@ -17,10 +21,11 @@ async def upload_pdf(file: UploadFile = File(...)):
     return result
 
 @router.post('/upload-directory')
-async def upload_directory(directory_path: str):
+async def upload_directory(request: DirectoryRequest):
     """Upload et indexe tous les PDFs d'un dossier"""
     try:
-        results = await pdf_service.process_directory(directory_path)
+        # Utilise le chemin fourni directement
+        results = await pdf_service.process_directory(request.directory_path)
         return {
             'status': 'success',
             'processed_files': results
