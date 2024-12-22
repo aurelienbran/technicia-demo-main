@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Body
+from fastapi import APIRouter, UploadFile, File, HTTPException
 from typing import List
 from services.pdf_service import PDFService
 from pathlib import Path, WindowsPath
@@ -6,10 +6,6 @@ from pydantic import BaseModel
 
 class DirectoryRequest(BaseModel):
     directory_path: str
-    
-    def clean_path(self) -> str:
-        # Remplace les backslashes simples par des doubles
-        return self.directory_path.replace('\\', '\\\\')
 
 router = APIRouter(prefix='/api/pdf')
 pdf_service = PDFService()
@@ -25,20 +21,25 @@ async def upload_pdf(file: UploadFile = File(...)):
     return result
 
 @router.post('/upload-directory')
-async def upload_directory(directory_path: str = Body(..., embed=True)):
+async def upload_directory(request: DirectoryRequest):
     """Upload et indexe tous les PDFs d'un dossier"""
     try:
-        # Nettoie et normalise le chemin
-        raw_path = directory_path.replace('/', '\\')
-        results = await pdf_service.process_directory(raw_path)
+        # Convertit le chemin en utilisant pathlib
+        path = Path(request.directory_path)
+        # Convertit en chemin absolu normalisé
+        abs_path = str(path.absolute())
+        print(f"Processing directory: {abs_path}")
+        
+        results = await pdf_service.process_directory(abs_path)
         return {
             'status': 'success',
+            'directory': abs_path,
             'processed_files': results
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Error processing directory: {str(e)}")
 
 @router.get('/files', response_model=List[str])
 def list_files():
