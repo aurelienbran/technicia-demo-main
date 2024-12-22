@@ -6,6 +6,10 @@ from pydantic import BaseModel
 
 class DirectoryRequest(BaseModel):
     directory_path: str
+    
+    def clean_path(self) -> str:
+        # Remplace les backslashes simples par des doubles
+        return self.directory_path.replace('\\', '\\\\')
 
 router = APIRouter(prefix='/api/pdf')
 pdf_service = PDFService()
@@ -21,11 +25,12 @@ async def upload_pdf(file: UploadFile = File(...)):
     return result
 
 @router.post('/upload-directory')
-async def upload_directory(request: DirectoryRequest):
+async def upload_directory(directory_path: str = Body(..., embed=True)):
     """Upload et indexe tous les PDFs d'un dossier"""
     try:
-        # Utilise le chemin fourni directement
-        results = await pdf_service.process_directory(request.directory_path)
+        # Nettoie et normalise le chemin
+        raw_path = directory_path.replace('/', '\\')
+        results = await pdf_service.process_directory(raw_path)
         return {
             'status': 'success',
             'processed_files': results
