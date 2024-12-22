@@ -6,6 +6,7 @@ from pathlib import Path
 import httpx
 import json
 import time
+import base64
 
 # Configuration du logging
 logging.basicConfig(
