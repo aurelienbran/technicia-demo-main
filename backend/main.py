@@ -4,13 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 
-from app.api.routes import chat
-from app.core.config import settings
-from app.core.logging import setup_logging
-from app.services.vector_store import VectorStore
-
-logger = setup_logging()
-
+# Version simplifiée pour le démarrage
 app = FastAPI(
    title="TechnicIA API",
    description="API for technical documentation analysis",
@@ -44,34 +38,20 @@ async def ping():
    """Endpoint simple pour tester la connexion"""
    return {"status": "success", "message": "pong!"}
 
-# Routes API
-app.include_router(chat.router, prefix="/api", tags=["chat"])
-
-@app.on_event("startup")
-async def startup_event():
-   """
-   Initialise les services au démarrage.
-   """
-   try:
-       vector_store = VectorStore()
-       await vector_store.init_collection()
-       logger.info("Vector store initialized successfully")
-   except Exception as e:
-       logger.error(f"Error initializing services: {str(e)}")
-       raise
-
-@app.on_event("shutdown")
-async def shutdown_event():
-   """
-   Nettoie les ressources lors de l'arrêt.
-   """
-   logger.info("Shutting down API...")
+# Route simple de chat pour les tests
+@app.post("/api/query")
+async def chat_query(request: dict):
+    return {
+        "response": "Test response",
+        "query": request.get("query", ""),
+        "status": "success"
+    }
 
 if __name__ == "__main__":
    import uvicorn
    uvicorn.run(
        "main:app",
-       host=settings.API_HOST,
-       port=settings.API_PORT,
+       host="0.0.0.0",
+       port=8000,
        reload=True
    )
