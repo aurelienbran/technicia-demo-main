@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     COLLECTION_NAME: str = "technical_docs"
     VECTOR_SIZE: int = 1024  # Voyage AI dimension
     
+    # Chunking Configuration
+    CHUNK_SIZE: int = 1000
+    CHUNK_OVERLAP: int = 100
+    
     # API Configuration
     API_PORT: int = 8000
     API_HOST: str = "0.0.0.0"
