@@ -1,5 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from typing import List
+from typing import List, Dict
 from services.pdf_service import PDFService
 from pathlib import Path, WindowsPath
 from pydantic import BaseModel
@@ -56,20 +56,41 @@ async def upload_directory(request: DirectoryRequest):
         print(f"Erreur lors du traitement: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error processing directory: {str(e)}")
 
+@router.get('/index-info')
+def get_index_info() -> Dict:
+    """Retourne des informations détaillées sur l'index"""
+    try:
+        info = pdf_service.get_index_info()
+        return {
+            'status': 'success',
+            'info': info
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post('/search')
 def search_pdfs(request: SearchRequest):
     """Recherche dans le contenu des PDFs indexés"""
-    if len(request.query.strip()) < 3:
-        raise HTTPException(
-            status_code=400,
-            detail="Le terme de recherche doit contenir au moins 3 caractères"
-        )
-    
-    results = pdf_service.search_content(request.query)
-    return {
-        'query': request.query,
-        'results': results
-    }
+    try:
+        if len(request.query.strip()) < 3:
+            raise HTTPException(
+                status_code=400,
+                detail="Le terme de recherche doit contenir au moins 3 caractères"
+            )
+        
+        # Afficher l'état de l'index avant la recherche
+        index_info = pdf_service.get_index_info()
+        print(f"\nÉtat de l'index avant la recherche : {index_info}")
+        
+        results = pdf_service.search_content(request.query)
+        return {
+            'query': request.query,
+            'indexed_files': index_info['total_files'],
+            'results': results
+        }
+    except Exception as e:
+        print(f"Erreur lors de la recherche: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get('/files', response_model=List[str])
 def list_files():
