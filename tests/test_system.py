@@ -65,7 +65,7 @@ class SystemTester:
 
     async def test_index_file(self):
         """Test de l'indexation d'un fichier"""
-        pdf_path = Path("docs/em.pdf")
+        pdf_path = Path("backend/docs/em.pdf")  # Modification du chemin ici
         
         with open(pdf_path, "rb") as f:
             files = {"file": (pdf_path.name, f, "application/pdf")}
