@@ -30,6 +30,18 @@ class PDFService:
         with open(self.index_file, 'w', encoding='utf-8') as f:
             json.dump(self.index, f, ensure_ascii=False, indent=2)
         print(f"Index sauvegardé avec {len(self.index)} documents")
+    
+    def get_index_info(self) -> Dict:
+        """Retourne des informations détaillées sur l'index"""
+        total_pages = sum(doc.get('page_count', 0) for doc in self.index.values())
+        total_size = sum(len(''.join(doc.get('content', []))) for doc in self.index.values())
+        
+        return {
+            'total_files': len(self.index),
+            'total_pages': total_pages,
+            'total_characters': total_size,
+            'files': list(self.index.keys())
+        }
         
     async def process_directory(self, directory_path: str) -> List[Dict]:
         """Process all PDFs in a directory"""
@@ -68,11 +80,15 @@ class PDFService:
         # Extraire le texte
         doc = fitz.open(str(file_path))
         text_content = []
+        total_chars = 0
         for page_num, page in enumerate(doc, 1):
             content = page.get_text()
             text_content.append(content)
+            total_chars += len(content)
             print(f"Page {page_num}: {len(content)} caractères extraits")
         doc.close()
+        
+        print(f"Total extrait de {filename}: {total_chars} caractères")
         
         # Créer l'entrée d'index
         index_entry = {
@@ -96,13 +112,17 @@ class PDFService:
         query = query.lower()
         
         for filename, doc_info in self.index.items():
+            print(f"\nAnalyse de {filename} ({len(doc_info.get('content', []))} pages)")
             matches = []
             total_occurrences = 0
             
             # Parcourir chaque page
-            for page_num, page_content in enumerate(doc_info['content']):
+            for page_num, page_content in enumerate(doc_info.get('content', [])):
+                if not page_content:  # Skip empty pages
+                    continue
+                    
                 page_text = page_content.lower()
-                print(f"Analyse de {filename} - Page {page_num+1} ({len(page_text)} caractères)")
+                print(f"  Page {page_num+1}: {len(page_text)} caractères")
                 
                 start = 0
                 while True:
@@ -111,7 +131,7 @@ class PDFService:
                         break
                         
                     total_occurrences += 1
-                    print(f"Occurrence trouvée dans {filename} page {page_num+1} position {pos}")
+                    print(f"    Occurrence trouvée position {pos}")
                     
                     # Extraire le contexte
                     context_start = max(0, pos - context_size)
@@ -136,7 +156,7 @@ class PDFService:
                     'matches': matches
                 })
         
-        print(f"Recherche terminée. {len(results)} documents contiennent le terme.")
+        print(f"\nRecherche terminée. {len(results)} documents contiennent le terme.")
         return results
     
     def get_indexed_files(self) -> List[str]:
