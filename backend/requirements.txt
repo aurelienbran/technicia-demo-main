@@ -4,5 +4,5 @@ python-multipart==0.0.5
 PyMuPDF==1.19.0
 pytest==6.2.5
 requests==2.26.0
-pydantic==1.8.2  # Version compatible avec FastAPI 0.68.0
+pydantic==1.8.2
 starlette==0.14.2
