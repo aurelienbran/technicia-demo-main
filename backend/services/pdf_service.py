@@ -12,6 +12,7 @@ import io
 from PIL import Image
 from .vector_store import VectorStore
 import uuid
+import aiohttp
 
 # Charger les variables d'environnement
 load_dotenv()
@@ -25,7 +26,7 @@ class PDFService:
         self.index_file = self.index_path / 'content_index.json'
         
         # Initialiser les clients
-        self.voyage_client = voyageai.Client()
+        self.voyage_api_key = os.getenv('VOYAGE_API_KEY')
         self.vector_store = VectorStore()
         self.model = "voyage-multimodal-3"
         print(f"Initialisé avec le modèle {self.model}")
@@ -84,17 +85,27 @@ class PDFService:
         if not content:
             raise ValueError("Aucun contenu valide fourni pour l'embedding")
         
-        response = await self.voyage_client.client.post(
-            "https://api.voyageai.com/v1/multimodalembeddings",
-            json={
-                "inputs": [{"content": content}],
-                "model": self.model,
-                "input_type": "document"
-            }
-        )
+        headers = {
+            "Authorization": f"Bearer {self.voyage_api_key}",
+            "Content-Type": "application/json"
+        }
         
-        result = response.json()
-        return result['data'][0]['embedding']
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api.voyageai.com/v1/multimodalembeddings",
+                json={
+                    "inputs": [{"content": content}],
+                    "model": self.model,
+                    "input_type": "document"
+                },
+                headers=headers
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    return result['data'][0]['embedding']
+                else:
+                    error_text = await response.text()
+                    raise ValueError(f"Erreur API Voyage: {error_text}")
 
     def _extract_images_from_page(self, page) -> List[bytes]:
         """Extrait les images d'une page PDF"""
@@ -121,6 +132,7 @@ class PDFService:
         file_path = self.storage_path / filename
         file_path.write_bytes(file)
         
+        doc = None
         try:
             # Extraire le texte et les images
             doc = fitz.open(str(file_path))
@@ -180,63 +192,14 @@ class PDFService:
             
         except Exception as e:
             # Nettoyer en cas d'erreur
+            if doc:
+                doc.close()
             if file_path.exists():
-                file_path.unlink()
+                try:
+                    file_path.unlink()
+                except PermissionError:
+                    print("Impossible de supprimer le fichier, il sera nettoyé plus tard")
             raise e
-            
-    def get_index_info(self) -> Dict:
-        """Retourne des informations sur l'index"""
-        collection_info = self.vector_store.get_collection_info()
-        return {
-            'total_files': len(self.index),
-            'indexed_vectors': collection_info['vectors_count'],
-            'storage_size': sum(f.stat().st_size for f in self.storage_path.glob('*.pdf')) // 1024  # KB
-        }
-    
-    def search_content(self, query: str, limit: int = 5) -> List[Dict]:
-        """Recherche dans le contenu des PDFs indexés"""
-        try:
-            # Générer l'embedding de la requête
-            query_embedding = self.voyage_client.embed(
-                [query],
-                model=self.model,
-                input_type="query"
-            ).embeddings[0]
-            
-            # Rechercher dans Qdrant
-            results = self.vector_store.search(query_embedding, limit=limit)
-            
-            # Formater les résultats
-            formatted_results = [
-                {
-                    'filename': item['metadata']['filename'],
-                    'page_num': item['metadata']['page_num'],
-                    'text': item['metadata']['text'],
-                    'has_images': item['metadata']['has_images'],
-                    'score': item['score']
-                }
-                for item in results
-            ]
-            
-            return formatted_results
-        except Exception as e:
-            print(f"Erreur lors de la recherche: {str(e)}")
-            return []
-    
-    def get_indexed_files(self) -> List[str]:
-        """Liste tous les fichiers indexés"""
-        return list(self.index.keys())
-    
-    def clear_storage(self):
-        """Nettoie le stockage et l'index"""
-        # Vider Qdrant
-        self.vector_store.clear_collection()
-        
-        # Supprimer les fichiers PDF stockés
-        if self.storage_path.exists():
-            shutil.rmtree(str(self.storage_path))
-            self.storage_path.mkdir(parents=True)
-            
-        # Réinitialiser l'index
-        self.index = {}
-        self.save_index()
+        finally:
+            if doc:
+                doc.close()
