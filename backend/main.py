@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import logging
-from routers import pdf_router
+from routers import pdf_router, chat_router
 
 # Version simplifiée pour le démarrage
 app = FastAPI(
@@ -22,8 +22,9 @@ app.add_middleware(
     max_age=600 # En secondes
 )
 
-# Ajout du router PDF
+# Ajouter les routers
 app.include_router(pdf_router.router)
+app.include_router(chat_router.router)
 
 # Routes racine
 @app.get("/")
@@ -39,16 +40,6 @@ async def root():
 async def ping():
     """Endpoint simple pour tester la connexion"""
     return {"status": "success", "message": "pong!"}
-
-# Route simple de chat pour les tests
-@app.post("/api/query")
-async def chat_query(request: Request):
-    body = await request.json()
-    return {
-        "response": "Test response",
-        "query": body.get("query", ""),
-        "status": "success"
-    }
 
 if __name__ == "__main__":
     import uvicorn
