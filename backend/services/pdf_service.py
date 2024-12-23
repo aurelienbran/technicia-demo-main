@@ -5,6 +5,11 @@ from datetime import datetime
 import os
 import shutil
 import json
+from dotenv import load_dotenv
+from voyage_embeddings.client import VoyageClient
+
+# Charger les variables d'environnement
+load_dotenv()
 
 class PDFService:
     def __init__(self, storage_path: str = 'storage/pdfs', index_path: str = 'storage/index'):
@@ -13,6 +18,13 @@ class PDFService:
         self.storage_path.mkdir(parents=True, exist_ok=True)
         self.index_path.mkdir(parents=True, exist_ok=True)
         self.index_file = self.index_path / 'content_index.json'
+        
+        # Initialiser le client Voyage AI
+        self.voyage_client = VoyageClient(
+            api_key=os.getenv('VOYAGE_API_KEY'),
+            model=os.getenv('VOYAGE_MODEL', 'voyage-2-multimodal')
+        )
+        
         self.load_index()
         
     def load_index(self):
@@ -30,44 +42,6 @@ class PDFService:
         with open(self.index_file, 'w', encoding='utf-8') as f:
             json.dump(self.index, f, ensure_ascii=False, indent=2)
         print(f"Index sauvegardé avec {len(self.index)} documents")
-    
-    def get_index_info(self) -> Dict:
-        """Retourne des informations détaillées sur l'index"""
-        total_pages = sum(doc.get('page_count', 0) for doc in self.index.values())
-        total_size = sum(len(''.join(doc.get('content', []))) for doc in self.index.values())
-        
-        return {
-            'total_files': len(self.index),
-            'total_pages': total_pages,
-            'total_characters': total_size,
-            'files': list(self.index.keys())
-        }
-        
-    async def process_directory(self, directory_path: str) -> List[Dict]:
-        """Process all PDFs in a directory"""
-        results = []
-        source_dir = WindowsPath(directory_path)
-        
-        if not source_dir.exists() or not source_dir.is_dir():
-            raise ValueError(f"Le dossier {str(source_dir)} n'existe pas ou n'est pas un dossier")
-            
-        for file_path in source_dir.glob('**/*.pdf'):
-            try:
-                print(f"Traitement du fichier : {file_path}")
-                content = file_path.read_bytes()
-                result = await self.process_pdf(content, file_path.name)
-                results.append(result)
-                
-            except Exception as e:
-                error_details = {
-                    'filename': file_path.name,
-                    'path': str(file_path),
-                    'error': str(e)
-                }
-                print(f"Erreur lors du traitement : {error_details}")
-                results.append(error_details)
-                
-        return results
         
     async def process_pdf(self, file: bytes, filename: str) -> Dict:
         """Process and index a PDF file"""
@@ -77,26 +51,55 @@ class PDFService:
         file_path = self.storage_path / filename
         file_path.write_bytes(file)
         
-        # Extraire le texte
+        # Extraire le texte et les images
         doc = fitz.open(str(file_path))
-        text_content = []
-        total_chars = 0
-        for page_num, page in enumerate(doc, 1):
-            content = page.get_text()
-            text_content.append(content)
-            total_chars += len(content)
-            print(f"Page {page_num}: {len(content)} caractères extraits")
-        doc.close()
+        pages_content = []
         
-        print(f"Total extrait de {filename}: {total_chars} caractères")
+        for page_num, page in enumerate(doc, 1):
+            print(f"Traitement de la page {page_num}")
+            
+            # Extraire le texte
+            text_content = page.get_text()
+            
+            # Extraire les images
+            image_list = page.get_images()
+            page_images = []
+            
+            for img_idx, img_info in enumerate(image_list):
+                try:
+                    base_image = doc.extract_image(img_info[0])
+                    # Vérifier si l'image est significative (taille minimale)
+                    if base_image and base_image["width"] > 100 and base_image["height"] > 100:
+                        # Générer embedding multimodal
+                        image_embedding = self.voyage_client.embed_image(base_image["image"])
+                        page_images.append({
+                            'image_idx': img_idx,
+                            'embedding': image_embedding
+                        })
+                except Exception as e:
+                    print(f"Erreur lors du traitement de l'image {img_idx}: {str(e)}")
+            
+            # Générer embedding pour le texte
+            text_embedding = self.voyage_client.embed_text(text_content)
+            
+            pages_content.append({
+                'page_num': page_num,
+                'text': text_content,
+                'text_embedding': text_embedding,
+                'images': page_images
+            })
+            
+            print(f"Page {page_num}: {len(text_content)} caractères, {len(page_images)} images indexées")
+            
+        doc.close()
         
         # Créer l'entrée d'index
         index_entry = {
             'filename': filename,
             'path': str(file_path),
             'upload_date': datetime.now().isoformat(),
-            'page_count': len(text_content),
-            'content': text_content
+            'page_count': len(pages_content),
+            'content': pages_content
         }
         
         # Mettre à jour l'index
@@ -105,71 +108,55 @@ class PDFService:
         
         return index_entry
     
-    def search_content(self, query: str, context_size: int = 100) -> List[Dict]:
-        """Recherche un terme dans tous les PDFs indexés"""
+    def search_content(self, query: str) -> List[Dict]:
+        """Recherche dans le contenu indexé en utilisant la similarité sémantique"""
         print(f"Recherche de '{query}' dans {len(self.index)} documents")
-        results = []
-        query = query.lower()
         
+        # Générer l'embedding de la requête
+        query_embedding = self.voyage_client.embed_text(query)
+        
+        results = []
         for filename, doc_info in self.index.items():
-            print(f"\nAnalyse de {filename} ({len(doc_info.get('content', []))} pages)")
-            matches = []
-            total_occurrences = 0
+            doc_matches = []
             
-            # Parcourir chaque page
-            for page_num, page_content in enumerate(doc_info.get('content', [])):
-                if not page_content:  # Skip empty pages
-                    continue
-                    
-                page_text = page_content.lower()
-                print(f"  Page {page_num+1}: {len(page_text)} caractères")
+            for page in doc_info['content']:
+                # Calculer la similarité avec le texte de la page
+                text_similarity = self.voyage_client.similarity(
+                    query_embedding,
+                    page['text_embedding']
+                )
                 
-                start = 0
-                while True:
-                    pos = page_text.find(query, start)
-                    if pos == -1:
-                        break
-                        
-                    total_occurrences += 1
-                    print(f"    Occurrence trouvée position {pos}")
-                    
-                    # Extraire le contexte
-                    context_start = max(0, pos - context_size)
-                    context_end = min(len(page_text), pos + len(query) + context_size)
-                    context = page_text[context_start:context_end]
-                    
-                    matches.append({
-                        'page': page_num + 1,
-                        'context': context.strip(),
-                        'position': pos
+                # Si la page contient des images, calculer aussi leur similarité
+                image_similarities = []
+                for img in page['images']:
+                    img_similarity = self.voyage_client.similarity(
+                        query_embedding,
+                        img['embedding']
+                    )
+                    if img_similarity > 0.7:  # Seuil de similarité pour les images
+                        image_similarities.append(img_similarity)
+                
+                if text_similarity > 0.7 or image_similarities:  # Seuil de similarité
+                    doc_matches.append({
+                        'page': page['page_num'],
+                        'text_similarity': text_similarity,
+                        'image_matches': len(image_similarities),
+                        'max_image_similarity': max(image_similarities) if image_similarities else 0,
+                        'context': page['text'][:200]  # Contexte limité
                     })
-                    
-                    start = pos + len(query)
-                    
-                    if len(matches) >= 5:  # Limite par document
-                        break
-                        
-            if matches:
+            
+            if doc_matches:
+                # Trier les résultats par similarité décroissante
+                doc_matches.sort(key=lambda x: max(x['text_similarity'], x['max_image_similarity']), reverse=True)
                 results.append({
                     'filename': filename,
-                    'total_occurrences': total_occurrences,
-                    'matches': matches
+                    'matches': doc_matches[:5]  # Limiter à 5 meilleurs résultats par document
                 })
         
-        print(f"\nRecherche terminée. {len(results)} documents contiennent le terme.")
-        return results
-    
-    def get_indexed_files(self) -> List[str]:
-        """Retourne la liste des fichiers indexés"""
-        return list(self.index.keys())
+        # Trier les documents par meilleure similarité
+        results.sort(
+            key=lambda x: max(m['text_similarity'] for m in x['matches']),
+            reverse=True
+        )
         
-    def clear_storage(self):
-        """Nettoie le stockage des PDFs et l'index"""
-        if self.storage_path.exists():
-            shutil.rmtree(str(self.storage_path))
-        if self.index_path.exists():
-            shutil.rmtree(str(self.index_path))
-        self.storage_path.mkdir(parents=True, exist_ok=True)
-        self.index_path.mkdir(parents=True, exist_ok=True)
-        self.index = {}
-        print("Stockage et index nettoyés")
+        return results
