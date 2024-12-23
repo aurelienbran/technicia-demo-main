@@ -6,7 +6,7 @@ import os
 import shutil
 import json
 from dotenv import load_dotenv
-from voyage_embeddings.client import VoyageClient
+import voyageai
 
 # Charger les variables d'environnement
 load_dotenv()
@@ -19,12 +19,10 @@ class PDFService:
         self.index_path.mkdir(parents=True, exist_ok=True)
         self.index_file = self.index_path / 'content_index.json'
         
-        # Initialiser le client Voyage AI avec voyage-multimodal-3
-        self.voyage_client = VoyageClient(
-            api_key=os.getenv('VOYAGE_API_KEY'),
-            model=os.getenv('VOYAGE_MODEL', 'voyage-multimodal-3')
-        )
-        print(f"Initialisé avec le modèle {os.getenv('VOYAGE_MODEL', 'voyage-multimodal-3')}")
+        # Initialiser le client Voyage AI
+        voyageai.api_key = os.getenv('VOYAGE_API_KEY')
+        self.model = os.getenv('VOYAGE_MODEL', 'voyage-multimodal-3')
+        print(f"Initialisé avec le modèle {self.model}")
         
         self.load_index()
         
@@ -72,7 +70,10 @@ class PDFService:
                     # Vérifier si l'image est significative (taille minimale)
                     if base_image and base_image["width"] > 100 and base_image["height"] > 100:
                         # Générer embedding multimodal
-                        image_embedding = self.voyage_client.embed_image(base_image["image"])
+                        image_embedding = voyageai.get_embedding(
+                            input=base_image["image"],
+                            model=self.model
+                        )
                         page_images.append({
                             'image_idx': img_idx,
                             'embedding': image_embedding
@@ -88,7 +89,10 @@ class PDFService:
             text_embeddings = []
             for chunk in text_chunks:
                 if chunk.strip():  # Vérifier que le chunk n'est pas vide
-                    embedding = self.voyage_client.embed_text(chunk)
+                    embedding = voyageai.get_embedding(
+                        input=chunk,
+                        model=self.model
+                    )
                     text_embeddings.append({
                         'text': chunk,
                         'embedding': embedding
@@ -124,7 +128,10 @@ class PDFService:
         print(f"Recherche de '{query}' dans {len(self.index)} documents")
         
         # Générer l'embedding de la requête
-        query_embedding = self.voyage_client.embed_text(query)
+        query_embedding = voyageai.get_embedding(
+            input=query,
+            model=self.model
+        )
         
         results = []
         for filename, doc_info in self.index.items():
@@ -135,9 +142,9 @@ class PDFService:
                 
                 # Vérifier la similarité avec chaque chunk de texte
                 for chunk in page['text_chunks']:
-                    similarity = self.voyage_client.similarity(
-                        query_embedding,
-                        chunk['embedding']
+                    similarity = voyageai.compare_embeddings(
+                        embedding_1=query_embedding,
+                        embedding_2=chunk['embedding']
                     )
                     if similarity > 0.7:  # Seuil de similarité
                         page_matches.append({
@@ -148,9 +155,9 @@ class PDFService:
                 # Vérifier la similarité avec les images
                 image_matches = []
                 for img in page['images']:
-                    similarity = self.voyage_client.similarity(
-                        query_embedding,
-                        img['embedding']
+                    similarity = voyageai.compare_embeddings(
+                        embedding_1=query_embedding,
+                        embedding_2=img['embedding']
                     )
                     if similarity > 0.7:
                         image_matches.append(similarity)
