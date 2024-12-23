@@ -19,9 +19,9 @@ class PDFService:
         self.index_path.mkdir(parents=True, exist_ok=True)
         self.index_file = self.index_path / 'content_index.json'
         
-        # Initialiser le client Voyage AI
-        voyageai.api_key = os.getenv('VOYAGE_API_KEY')
-        self.model = os.getenv('VOYAGE_MODEL', 'voyage-multimodal-3')
+        # Initialiser le client Voyage AI asynchrone
+        self.voyage_client = voyageai.AsyncClient()
+        self.model = "voyage-3"
         print(f"Initialisé avec le modèle {self.model}")
         
         self.load_index()
@@ -70,8 +70,8 @@ class PDFService:
                     # Vérifier si l'image est significative (taille minimale)
                     if base_image and base_image["width"] > 100 and base_image["height"] > 100:
                         # Générer embedding multimodal
-                        image_embedding = voyageai.get_embedding(
-                            input=base_image["image"],
+                        image_embedding = await self.voyage_client.embed(
+                            [base_image["image"]],
                             model=self.model
                         )
                         page_images.append({
@@ -89,8 +89,8 @@ class PDFService:
             text_embeddings = []
             for chunk in text_chunks:
                 if chunk.strip():  # Vérifier que le chunk n'est pas vide
-                    embedding = voyageai.get_embedding(
-                        input=chunk,
+                    embedding = await self.voyage_client.embed(
+                        [chunk],
                         model=self.model
                     )
                     text_embeddings.append({
@@ -122,91 +122,3 @@ class PDFService:
         self.save_index()
         
         return index_entry
-    
-    def search_content(self, query: str) -> List[Dict]:
-        """Recherche dans le contenu indexé en utilisant la similarité sémantique"""
-        print(f"Recherche de '{query}' dans {len(self.index)} documents")
-        
-        # Générer l'embedding de la requête
-        query_embedding = voyageai.get_embedding(
-            input=query,
-            model=self.model
-        )
-        
-        results = []
-        for filename, doc_info in self.index.items():
-            doc_matches = []
-            
-            for page in doc_info['content']:
-                page_matches = []
-                
-                # Vérifier la similarité avec chaque chunk de texte
-                for chunk in page['text_chunks']:
-                    similarity = voyageai.compare_embeddings(
-                        embedding_1=query_embedding,
-                        embedding_2=chunk['embedding']
-                    )
-                    if similarity > 0.7:  # Seuil de similarité
-                        page_matches.append({
-                            'text': chunk['text'],
-                            'similarity': similarity
-                        })
-                
-                # Vérifier la similarité avec les images
-                image_matches = []
-                for img in page['images']:
-                    similarity = voyageai.compare_embeddings(
-                        embedding_1=query_embedding,
-                        embedding_2=img['embedding']
-                    )
-                    if similarity > 0.7:
-                        image_matches.append(similarity)
-                
-                if page_matches or image_matches:
-                    doc_matches.append({
-                        'page': page['page_num'],
-                        'text_matches': sorted(page_matches, key=lambda x: x['similarity'], reverse=True)[:3],
-                        'image_matches': len(image_matches),
-                        'max_image_similarity': max(image_matches) if image_matches else 0
-                    })
-            
-            if doc_matches:
-                # Trier les résultats par similarité décroissante
-                doc_matches.sort(
-                    key=lambda x: max(
-                        [m['similarity'] for m in x['text_matches']] + [x['max_image_similarity']]
-                    ),
-                    reverse=True
-                )
-                results.append({
-                    'filename': filename,
-                    'matches': doc_matches[:5]  # Limiter à 5 meilleurs résultats par document
-                })
-        
-        # Trier les documents par meilleure similarité
-        results.sort(
-            key=lambda x: max(
-                max(m['similarity'] for match in x['matches'] for m in match['text_matches'])
-                if x['matches'] and x['matches'][0]['text_matches']
-                else 0,
-                max(match['max_image_similarity'] for match in x['matches'])
-            ),
-            reverse=True
-        )
-        
-        return results
-    
-    def get_indexed_files(self) -> List[str]:
-        """Retourne la liste des fichiers indexés"""
-        return list(self.index.keys())
-        
-    def clear_storage(self):
-        """Nettoie le stockage des PDFs et l'index"""
-        if self.storage_path.exists():
-            shutil.rmtree(str(self.storage_path))
-        if self.index_path.exists():
-            shutil.rmtree(str(self.index_path))
-        self.storage_path.mkdir(parents=True, exist_ok=True)
-        self.index_path.mkdir(parents=True, exist_ok=True)
-        self.index = {}
-        print("Stockage et index nettoyés")
