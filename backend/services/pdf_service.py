@@ -24,7 +24,7 @@ class PDFService:
         # Initialiser les clients
         self.voyage_client = voyageai.Client()
         self.vector_store = VectorStore()
-        self.model = "voyage-2"
+        self.model = "voyage-multimodal-3"
         print(f"Initialisé avec le modèle {self.model}")
         
         self.load_index()
@@ -63,6 +63,43 @@ class PDFService:
             # Extraire le texte
             text_content = page.get_text()
             
+            # Extraire les images
+            image_list = page.get_images()
+            page_images = []
+            
+            for img_idx, img_info in enumerate(image_list):
+                try:
+                    base_image = doc.extract_image(img_info[0])
+                    # Vérifier si l'image est significative (taille minimale)
+                    if base_image and base_image["width"] > 100 and base_image["height"] > 100:
+                        # Générer un ID unique pour cette image
+                        image_id = str(uuid.uuid4())
+                        
+                        # Générer embedding multimodal
+                        image_embedding = self.voyage_client.embed(
+                            [base_image["image"]],
+                            model=self.model,
+                            input_type="image"
+                        ).embeddings[0]
+                        
+                        # Préparer les métadonnées
+                        metadata = {
+                            'filename': filename,
+                            'page_num': page_num,
+                            'type': 'image',
+                            'width': base_image["width"],
+                            'height': base_image["height"]
+                        }
+                        
+                        chunks_with_embeddings.append({
+                            'id': image_id,
+                            'embedding': image_embedding,
+                            'metadata': metadata
+                        })
+                        
+                except Exception as e:
+                    print(f"Erreur lors du traitement de l'image {img_idx}: {str(e)}")
+            
             # Diviser le texte en morceaux si nécessaire (limite de tokens)
             chunk_size = 1000  # Ajuster selon les limites du modèle
             text_chunks = [text_content[i:i+chunk_size] for i in range(0, len(text_content), chunk_size)]
@@ -95,7 +132,7 @@ class PDFService:
                         'metadata': metadata
                     })
             
-            print(f"Page {page_num}: {len(text_chunks)} chunks de texte indexés")
+            print(f"Page {page_num}: {len(text_chunks)} chunks de texte et {len(page_images)} images indexés")
             
         doc.close()
         
@@ -169,12 +206,22 @@ class PDFService:
         formatted_results = []
         for result in results:
             metadata = result['metadata']
-            formatted_results.append({
-                'filename': metadata['filename'],
-                'page_num': metadata['page_num'],
-                'text': metadata['chunk_text'],
-                'score': result['score']
-            })
+            if metadata['type'] == 'text':
+                formatted_results.append({
+                    'filename': metadata['filename'],
+                    'page_num': metadata['page_num'],
+                    'text': metadata['chunk_text'],
+                    'type': 'text',
+                    'score': result['score']
+                })
+            else:  # type == 'image'
+                formatted_results.append({
+                    'filename': metadata['filename'],
+                    'page_num': metadata['page_num'],
+                    'type': 'image',
+                    'dimensions': f"{metadata['width']}x{metadata['height']}",
+                    'score': result['score']
+                })
             
         return formatted_results
     
