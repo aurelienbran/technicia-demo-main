@@ -7,4 +7,4 @@ requests>=2.26.0
 pydantic>=1.10.0,<2.0.0
 starlette>=0.26.0,<0.27.0
 python-dotenv>=0.19.0
-voyageai  # Le package s'appelle voyageai selon la documentation
+voyageai>=0.1.0  # Toujours installer la dernière version
