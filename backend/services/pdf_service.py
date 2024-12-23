@@ -30,7 +30,23 @@ class PDFService:
         self.model = "voyage-multimodal-3"
         print(f"Initialisé avec le modèle {self.model}")
         
+        self.index = {}
         self.load_index()
+
+    def load_index(self):
+        """Charge l'index existant ou en crée un nouveau"""
+        if self.index_file.exists():
+            with open(self.index_file, 'r', encoding='utf-8') as f:
+                self.index = json.load(f)
+                print(f"Index chargé avec {len(self.index)} documents")
+        else:
+            print("Nouvel index créé")
+
+    def save_index(self):
+        """Sauvegarde l'index sur le disque"""
+        with open(self.index_file, 'w', encoding='utf-8') as f:
+            json.dump(self.index, f, ensure_ascii=False, indent=2)
+        print(f"Index sauvegardé avec {len(self.index)} documents")
 
     def _image_to_base64(self, image) -> str:
         """Convertit une image en base64 pour l'API Voyage"""
@@ -167,3 +183,60 @@ class PDFService:
             if file_path.exists():
                 file_path.unlink()
             raise e
+            
+    def get_index_info(self) -> Dict:
+        """Retourne des informations sur l'index"""
+        collection_info = self.vector_store.get_collection_info()
+        return {
+            'total_files': len(self.index),
+            'indexed_vectors': collection_info['vectors_count'],
+            'storage_size': sum(f.stat().st_size for f in self.storage_path.glob('*.pdf')) // 1024  # KB
+        }
+    
+    def search_content(self, query: str, limit: int = 5) -> List[Dict]:
+        """Recherche dans le contenu des PDFs indexés"""
+        try:
+            # Générer l'embedding de la requête
+            query_embedding = self.voyage_client.embed(
+                [query],
+                model=self.model,
+                input_type="query"
+            ).embeddings[0]
+            
+            # Rechercher dans Qdrant
+            results = self.vector_store.search(query_embedding, limit=limit)
+            
+            # Formater les résultats
+            formatted_results = [
+                {
+                    'filename': item['metadata']['filename'],
+                    'page_num': item['metadata']['page_num'],
+                    'text': item['metadata']['text'],
+                    'has_images': item['metadata']['has_images'],
+                    'score': item['score']
+                }
+                for item in results
+            ]
+            
+            return formatted_results
+        except Exception as e:
+            print(f"Erreur lors de la recherche: {str(e)}")
+            return []
+    
+    def get_indexed_files(self) -> List[str]:
+        """Liste tous les fichiers indexés"""
+        return list(self.index.keys())
+    
+    def clear_storage(self):
+        """Nettoie le stockage et l'index"""
+        # Vider Qdrant
+        self.vector_store.clear_collection()
+        
+        # Supprimer les fichiers PDF stockés
+        if self.storage_path.exists():
+            shutil.rmtree(str(self.storage_path))
+            self.storage_path.mkdir(parents=True)
+            
+        # Réinitialiser l'index
+        self.index = {}
+        self.save_index()
