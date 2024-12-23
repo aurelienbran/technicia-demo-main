@@ -1,9 +1,9 @@
 import pytest
 from pathlib import Path
 import os
-from services.pdf_service import PDFService
-from services.vector_store import VectorStore
-from services.claude_service import ClaudeService
+from backend.services.pdf_service import PDFService
+from backend.services.vector_store import VectorStore
+from backend.services.claude_service import ClaudeService
 
 # Fixtures pour les tests
 @pytest.fixture
@@ -14,10 +14,10 @@ def pdf_service():
     service = PDFService(storage_path=storage_path, index_path=index_path)
     yield service
     # Nettoyage après les tests
-    if Path(storage_path).exists():
-        Path(storage_path).unlink()
-    if Path(index_path).exists():
-        Path(index_path).unlink()
+    path = Path(storage_path).parent
+    if path.exists():
+        import shutil
+        shutil.rmtree(path)
 
 @pytest.fixture
 def vector_store():
@@ -41,10 +41,8 @@ def test_pdf_service_initialization(pdf_service):
 async def test_pdf_processing(pdf_service):
     """Test le traitement d'un PDF"""
     # Créer un PDF de test simple
-    test_pdf_path = 'test.pdf'
-    with open(test_pdf_path, 'wb') as f:
-        # TODO: Créer un PDF de test minimal
-        pass
+    test_pdf_path = Path('test.pdf')
+    test_pdf_path.write_bytes(b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>")
     
     with open(test_pdf_path, 'rb') as f:
         content = f.read()
@@ -53,6 +51,8 @@ async def test_pdf_processing(pdf_service):
     assert result is not None
     assert 'filename' in result
     assert result['filename'] == 'test.pdf'
+    
+    test_pdf_path.unlink()
 
 # Tests du VectorStore
 def test_vector_store_initialization(vector_store):
@@ -64,7 +64,7 @@ def test_vector_store_initialization(vector_store):
 def test_vector_operations(vector_store):
     """Test les opérations de base sur les vecteurs"""
     # Ajouter des vecteurs de test
-    test_vectors = [[0.1, 0.2, 0.3] * 341]  # Pour obtenir dim 1024
+    test_vectors = [[0.1] * 1024]  # Dimension correcte pour voyage-multimodal-3
     test_metadata = [{'text': 'test content', 'page': 1}]
     
     ids = vector_store.add_vectors(test_vectors, test_metadata)
