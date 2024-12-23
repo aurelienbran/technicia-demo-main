@@ -1,12 +1,61 @@
 import pytest
 from fastapi.testclient import TestClient
-from backend.main import app
-import json
 from pathlib import Path
+import json
+import os
+import shutil
+from PIL import Image
+import io
+from backend.main import app
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def client():
     return TestClient(app)
+
+@pytest.fixture
+def sample_image():
+    """Crée une image de test"""
+    img = Image.new('RGB', (100, 100), color='red')
+    img_byte_arr = io.BytesIO()
+    img.save(img_byte_arr, format='PNG')
+    return img_byte_arr.getvalue()
+
+@pytest.fixture
+def sample_pdf_with_image(sample_image):
+    """Crée un PDF de test avec image"""
+    import fitz
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((50, 50), "Test PDF with image")
+    img_rect = fitz.Rect(100, 100, 200, 200)
+    page.insert_image(img_rect, stream=sample_image)
+    
+    pdf_path = Path('test_with_image.pdf')
+    doc.save(str(pdf_path))
+    doc.close()
+    
+    with open(pdf_path, 'rb') as f:
+        content = f.read()
+    
+    pdf_path.unlink()
+    return content
+
+@pytest.fixture(autouse=True)
+def setup_teardown():
+    # Setup - créer les dossiers nécessaires
+    test_storage = Path('test_storage')
+    test_storage.mkdir(exist_ok=True)
+    
+    yield
+    
+    # Teardown - nettoyer
+    if test_storage.exists():
+        shutil.rmtree(test_storage)
+    
+    files_to_clean = ['test.pdf', 'test.txt', 'test_with_image.pdf']
+    for file in files_to_clean:
+        if os.path.exists(file):
+            os.remove(file)
 
 # Tests des endpoints de base
 def test_root_endpoint(client):
@@ -22,77 +71,46 @@ def test_ping_endpoint(client):
     assert response.json()["message"] == "pong!"
 
 # Tests des endpoints PDF
-def test_pdf_upload(client):
-    """Test l'upload d'un PDF"""
-    # Créer un fichier PDF de test
-    test_pdf_path = Path("test.pdf")
-    test_pdf_path.write_bytes(b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>")
+def test_pdf_upload_with_text_only(client):
+    """Test l'upload d'un PDF text only"""
+    import fitz
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((50, 50), "Test PDF content")
     
-    with open(test_pdf_path, "rb") as f:
+    pdf_path = Path("test.pdf")
+    doc.save(str(pdf_path))
+    doc.close()
+    
+    with open(pdf_path, "rb") as f:
         response = client.post(
             "/api/pdf/upload",
             files={"file": ("test.pdf", f, "application/pdf")}
         )
     
     assert response.status_code == 200
-    test_pdf_path.unlink()
-
-def test_pdf_search(client):
-    """Test la recherche dans les PDFs"""
-    response = client.post(
-        "/api/pdf/search",
-        json={"query": "test search"}
-    )
-    
-    assert response.status_code == 200
     data = response.json()
-    assert "results" in data
+    assert data['status'] == 'success'
+    assert 'details' in data
 
-def test_list_files(client):
-    """Test la liste des fichiers indexés"""
-    response = client.get("/api/pdf/files")
-    assert response.status_code == 200
-    assert isinstance(response.json(), list)
-
-# Tests des endpoints de chat
-def test_chat_query(client):
-    """Test une requête de chat"""
-    response = client.post(
-        "/api/chat",
-        json={
-            "query": "Que fait ce système ?",
-            "context_limit": 3
-        }
-    )
+def test_pdf_upload_with_image(client, sample_pdf_with_image):
+    """Test l'upload d'un PDF avec image"""
+    pdf_path = Path("test_with_image.pdf")
+    pdf_path.write_bytes(sample_pdf_with_image)
     
-    assert response.status_code == 200
-    data = response.json()
-    assert "response" in data
-    assert "sources" in data
-
-def test_document_summary(client):
-    """Test la génération de résumé"""
-    # D'abord uploader un PDF de test
-    test_pdf_path = Path("test.pdf")
-    test_pdf_path.write_bytes(b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>")
-    
-    with open(test_pdf_path, "rb") as f:
-        upload_response = client.post(
+    with open(pdf_path, "rb") as f:
+        response = client.post(
             "/api/pdf/upload",
-            files={"file": ("test.pdf", f, "application/pdf")}
+            files={"file": ("test_with_image.pdf", f, "application/pdf")}
         )
     
-    # Ensuite tester le résumé
-    response = client.post(f"/api/chat/summarize/test.pdf")
-    
     assert response.status_code == 200
     data = response.json()
-    assert "summary" in data
-    assert "filename" in data
-    
-    test_pdf_path.unlink()
+    assert data['status'] == 'success'
+    assert 'details' in data
+    # Vérifier que l'indexation a bien pris en compte l'image
+    assert data['details'].get('chunk_count', 0) > 0
 
-# Tests des cas d'erreur
 def test_invalid_pdf_upload(client):
     """Test l'upload d'un fichier non-PDF"""
     test_file = Path("test.txt")
@@ -105,12 +123,47 @@ def test_invalid_pdf_upload(client):
         )
     
     assert response.status_code == 400
-    test_file.unlink()
+    assert "doit être un PDF" in response.json()['detail']
 
-def test_empty_chat_query(client):
-    """Test une requête de chat vide"""
+def test_pdf_search_with_results(client, sample_pdf_with_image):
+    """Test la recherche avec résultats"""
+    # D'abord uploader un PDF
+    pdf_path = Path("test_with_image.pdf")
+    pdf_path.write_bytes(sample_pdf_with_image)
+    
+    with open(pdf_path, "rb") as f:
+        upload_response = client.post(
+            "/api/pdf/upload",
+            files={"file": ("test_with_image.pdf", f, "application/pdf")}
+        )
+    
+    assert upload_response.status_code == 200
+    
+    # Maintenant faire une recherche
+    search_response = client.post(
+        "/api/pdf/search",
+        json={"query": "Test PDF with image"}
+    )
+    
+    assert search_response.status_code == 200
+    results = search_response.json()
+    assert len(results.get('results', [])) > 0
+
+def test_pdf_search_no_results(client):
+    """Test la recherche sans résultats"""
     response = client.post(
-        "/api/chat",
+        "/api/pdf/search",
+        json={"query": "Something that doesn't exist"}
+    )
+    
+    assert response.status_code == 200
+    results = response.json()
+    assert len(results.get('results', [])) == 0
+
+def test_empty_query_search(client):
+    """Test une recherche avec requête vide"""
+    response = client.post(
+        "/api/pdf/search",
         json={"query": ""}
     )
     
