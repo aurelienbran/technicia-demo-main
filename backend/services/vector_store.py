@@ -11,6 +11,7 @@ class VectorStore:
     def __init__(self):
         self.client = QdrantClient("localhost", port=6333)
         self.collection_name = "technicia_docs"
+        self.vector_size = 1024  # Taille des vecteurs pour voyage-multimodal-3
         self._ensure_collection()
 
     def _ensure_collection(self):
@@ -22,14 +23,20 @@ class VectorStore:
             self.client.create_collection(
                 collection_name=self.collection_name,
                 vectors_config=models.VectorParams(
-                    size=1024,  # Dimension des vecteurs Voyage AI
+                    size=self.vector_size,  # Dimension des vecteurs Voyage Multimodal-3
                     distance=models.Distance.COSINE
                 )
             )
-            print(f"Collection {self.collection_name} créée")
+            print(f"Collection {self.collection_name} créée avec dimension {self.vector_size}")
 
     def add_vectors(self, vectors: List[List[float]], metadata: List[Dict], ids: Optional[List[str]] = None) -> List[str]:
         """Ajoute des vecteurs à la collection avec leurs métadonnées"""
+        if not vectors or not metadata:
+            raise ValueError("Les listes de vecteurs et de métadonnées ne peuvent pas être vides")
+            
+        if len(vectors[0]) != self.vector_size:
+            raise ValueError(f"La dimension des vecteurs doit être {self.vector_size}")
+
         points = [
             models.PointStruct(
                 id=str(i) if ids is None else ids[i],
@@ -39,34 +46,50 @@ class VectorStore:
             for i, vector in enumerate(vectors)
         ]
 
-        operation_info = self.client.upsert(
-            collection_name=self.collection_name,
-            points=points
-        )
+        try:
+            operation_info = self.client.upsert(
+                collection_name=self.collection_name,
+                points=points
+            )
 
-        return [str(point.id) for point in points]
+            return [str(point.id) for point in points]
+            
+        except Exception as e:
+            print(f"Erreur lors de l'ajout des vecteurs: {str(e)}")
+            raise
 
     def search(self, query_vector: List[float], limit: int = 5) -> List[Dict]:
         """Recherche les documents les plus similaires"""
-        search_result = self.client.search(
-            collection_name=self.collection_name,
-            query_vector=query_vector,
-            limit=limit
-        )
+        if len(query_vector) != self.vector_size:
+            raise ValueError(f"La dimension du vecteur de requête doit être {self.vector_size}")
 
-        return [
-            {
-                'score': hit.score,
-                'metadata': hit.payload,
-                'id': hit.id
-            }
-            for hit in search_result
-        ]
+        try:
+            search_result = self.client.search(
+                collection_name=self.collection_name,
+                query_vector=query_vector,
+                limit=limit
+            )
+
+            return [
+                {
+                    'score': hit.score,
+                    'metadata': hit.payload,
+                    'id': hit.id
+                }
+                for hit in search_result
+            ]
+        except Exception as e:
+            print(f"Erreur lors de la recherche: {str(e)}")
+            return []
 
     def clear_collection(self):
         """Supprime tous les points de la collection"""
-        self.client.delete_collection(self.collection_name)
-        self._ensure_collection()
+        try:
+            self.client.delete_collection(self.collection_name)
+            self._ensure_collection()
+        except Exception as e:
+            print(f"Erreur lors du nettoyage de la collection: {str(e)}")
+            raise
 
     def get_collection_info(self) -> Dict:
         """Récupère les informations sur la collection"""
