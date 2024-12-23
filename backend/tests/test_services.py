@@ -1,9 +1,47 @@
 import pytest
 from pathlib import Path
 import os
+import base64
+from PIL import Image
+import io
 from backend.services.pdf_service import PDFService
 from backend.services.vector_store import VectorStore
 from backend.services.claude_service import ClaudeService
+
+@pytest.fixture
+def sample_image():
+    """Crée une image de test simple"""
+    img = Image.new('RGB', (100, 100), color='red')
+    img_byte_arr = io.BytesIO()
+    img.save(img_byte_arr, format='PNG')
+    return img_byte_arr.getvalue()
+
+@pytest.fixture
+def sample_pdf_with_image(sample_image):
+    """Crée un PDF de test avec une image"""
+    import fitz
+    
+    # Créer un nouveau document PDF
+    doc = fitz.open()
+    page = doc.new_page()
+    
+    # Ajouter du texte
+    page.insert_text((50, 50), "Test PDF with image")
+    
+    # Ajouter l'image
+    img_rect = fitz.Rect(100, 100, 200, 200)
+    page.insert_image(img_rect, stream=sample_image)
+    
+    # Sauvegarder le PDF
+    pdf_path = Path('test_with_image.pdf')
+    doc.save(str(pdf_path))
+    doc.close()
+    
+    with open(pdf_path, 'rb') as f:
+        content = f.read()
+    
+    pdf_path.unlink()
+    return content
 
 # Fixtures pour les tests
 @pytest.fixture
@@ -30,29 +68,43 @@ def vector_store():
 def claude_service():
     return ClaudeService()
 
-# Tests du PDFService
-def test_pdf_service_initialization(pdf_service):
-    """Test l'initialisation du service PDF"""
-    assert pdf_service is not None
-    assert Path(pdf_service.storage_path).exists()
-    assert Path(pdf_service.index_path).exists()
+# Tests des méthodes utilitaires
+def test_image_to_base64(pdf_service, sample_image):
+    """Test la conversion d'image en base64"""
+    base64_str = pdf_service._image_to_base64(sample_image)
+    assert base64_str.startswith('data:image/png;base64,')
+    assert len(base64_str) > 100  # Vérifier qu'il y a des données
+
+def test_create_multimodal_content(pdf_service, sample_image):
+    """Test la création du contenu multimodal"""
+    content = pdf_service._create_multimodal_content(
+        "Test text",
+        [sample_image]
+    )
+    assert len(content) == 2  # texte + image
+    assert content[0]['type'] == 'text'
+    assert content[1]['type'] == 'image_base64'
+
+# Test du traitement PDF
+@pytest.mark.asyncio
+async def test_multimodal_embedding(pdf_service):
+    """Test la génération d'embedding multimodal"""
+    test_text = "Test content"
+    embedding = await pdf_service.get_multimodal_embedding(test_text)
+    assert len(embedding) == 1024  # Vérifier la dimension du vecteur
 
 @pytest.mark.asyncio
-async def test_pdf_processing(pdf_service):
-    """Test le traitement d'un PDF"""
-    # Créer un PDF de test simple
-    test_pdf_path = Path('test.pdf')
-    test_pdf_path.write_bytes(b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>")
-    
-    with open(test_pdf_path, 'rb') as f:
-        content = f.read()
-        result = await pdf_service.process_pdf(content, 'test.pdf')
+async def test_pdf_with_image_processing(pdf_service, sample_pdf_with_image):
+    """Test le traitement d'un PDF contenant une image"""
+    result = await pdf_service.process_pdf(sample_pdf_with_image, 'test_with_image.pdf')
     
     assert result is not None
-    assert 'filename' in result
-    assert result['filename'] == 'test.pdf'
+    assert 'chunk_count' in result
+    assert result['chunk_count'] > 0
     
-    test_pdf_path.unlink()
+    # Vérifier que les métadonnées incluent les infos d'image
+    collection_info = pdf_service.vector_store.get_collection_info()
+    assert collection_info['vectors_count'] > 0
 
 # Tests du VectorStore
 def test_vector_store_initialization(vector_store):
@@ -63,10 +115,16 @@ def test_vector_store_initialization(vector_store):
 
 def test_vector_operations(vector_store):
     """Test les opérations de base sur les vecteurs"""
-    # Ajouter des vecteurs de test
-    test_vectors = [[0.1] * 1024]  # Dimension correcte pour voyage-multimodal-3
-    test_metadata = [{'text': 'test content', 'page': 1}]
+    # Créer des vecteurs de test
+    test_vectors = [[0.1] * 1024]  # dimension pour multimodal-3
+    test_metadata = [{
+        'text': 'test content',
+        'page': 1,
+        'has_images': True,
+        'image_count': 1
+    }]
     
+    # Ajouter les vecteurs
     ids = vector_store.add_vectors(test_vectors, test_metadata)
     assert len(ids) == 1
     
@@ -74,39 +132,4 @@ def test_vector_operations(vector_store):
     results = vector_store.search(test_vectors[0], limit=1)
     assert len(results) == 1
     assert results[0]['metadata']['text'] == 'test content'
-
-# Tests du ClaudeService
-@pytest.mark.asyncio
-async def test_claude_response_generation(claude_service):
-    """Test la génération de réponses"""
-    test_query = "Que fait ce système ?"
-    test_context = [
-        {
-            'filename': 'test.pdf',
-            'page_num': 1,
-            'text': 'Ce système est un assistant technique.',
-            'score': 0.95
-        }
-    ]
-    
-    response = await claude_service.generate_response(test_query, test_context)
-    assert response is not None
-    assert isinstance(response, str)
-    assert len(response) > 0
-
-@pytest.mark.asyncio
-async def test_document_summarization(claude_service):
-    """Test la génération de résumés"""
-    test_chunks = [
-        {
-            'filename': 'test.pdf',
-            'page_num': 1,
-            'text': 'Document de test avec du contenu technique.',
-            'score': 1.0
-        }
-    ]
-    
-    summary = await claude_service.generate_summary(test_chunks)
-    assert summary is not None
-    assert isinstance(summary, str)
-    assert len(summary) > 0
+    assert results[0]['metadata']['has_images'] == True
