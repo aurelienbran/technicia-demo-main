@@ -9,6 +9,10 @@ class DirectoryRequest(BaseModel):
 
 class SearchRequest(BaseModel):
     query: str
+    
+    @property
+    def is_valid(self):
+        return len(self.query.strip()) >= 3
 
 router = APIRouter(prefix='/api/pdf')
 pdf_service = PDFService()
@@ -16,12 +20,24 @@ pdf_service = PDFService()
 @router.post('/upload')
 async def upload_pdf(file: UploadFile = File(...)):
     """Upload et indexe un fichier PDF"""
-    if not file.filename.endswith('.pdf'):
-        return {'error': 'Le fichier doit être un PDF'}
+    if not file.filename.lower().endswith('.pdf'):
+        raise HTTPException(
+            status_code=400,
+            detail="Le fichier doit être un PDF"
+        )
     
-    content = await file.read()
-    result = await pdf_service.process_pdf(content, file.filename)
-    return result
+    try:
+        content = await file.read()
+        result = await pdf_service.process_pdf(content, file.filename)
+        return {
+            'status': 'success',
+            'filename': file.filename,
+            'details': result
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post('/upload-directory')
 async def upload_directory(request: DirectoryRequest):
@@ -29,7 +45,6 @@ async def upload_directory(request: DirectoryRequest):
     try:
         path = Path(request.directory_path)
         abs_path = str(path.absolute())
-        print(f"Processing directory: {abs_path}")
         
         # Vérifier si le dossier existe
         if not path.exists():
@@ -39,7 +54,6 @@ async def upload_directory(request: DirectoryRequest):
             
         # Vérifier le contenu du dossier
         pdf_files = list(path.glob('**/*.pdf'))
-        print(f"PDFs trouvés: {[f.name for f in pdf_files]}")
         
         if not pdf_files:
             raise HTTPException(status_code=400, detail=f"Aucun PDF trouvé dans {abs_path}")
@@ -50,11 +64,10 @@ async def upload_directory(request: DirectoryRequest):
             'directory': abs_path,
             'processed_files': results
         }
-    except HTTPException as e:
-        raise e
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"Erreur lors du traitement: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error processing directory: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get('/index-info')
 def get_index_info() -> Dict:
@@ -72,22 +85,29 @@ def get_index_info() -> Dict:
 def search_pdfs(request: SearchRequest):
     """Recherche dans le contenu des PDFs indexés"""
     try:
-        if len(request.query.strip()) < 3:
+        if not request.is_valid:
             raise HTTPException(
                 status_code=400,
                 detail="Le terme de recherche doit contenir au moins 3 caractères"
             )
         
-        # Afficher l'état de l'index avant la recherche
+        # Afficher l'état de l'index
         index_info = pdf_service.get_index_info()
         print(f"\nÉtat de l'index avant la recherche : {index_info}")
+        
+        if index_info['total_files'] == 0:
+            return {
+                'query': request.query,
+                'results': []
+            }
         
         results = pdf_service.search_content(request.query)
         return {
             'query': request.query,
-            'indexed_files': index_info['total_files'],
             'results': results
         }
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Erreur lors de la recherche: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
