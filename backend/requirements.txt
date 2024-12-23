@@ -1,10 +1,10 @@
-fastapi==0.68.0
-uvicorn==0.15.0
-python-multipart==0.0.5
-PyMuPDF==1.19.0
-pytest==6.2.5
-requests==2.26.0
-pydantic==1.8.2
-starlette==0.14.2
-python-dotenv==1.0.0
-voyageai>=0.1.0  # Cette syntaxe permet d'avoir toujours la dernière version
+fastapi>=0.95.0,<0.96.0
+uvicorn>=0.22.0,<0.23.0
+python-multipart>=0.0.5
+PyMuPDF>=1.19.0
+pytest>=6.2.5
+requests>=2.26.0
+pydantic>=1.10.0,<2.0.0
+starlette>=0.26.0,<0.27.0
+python-dotenv>=0.19.0
+voyageai>=0.1.0
