@@ -2,6 +2,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from typing import List, Dict, Optional
 import os
+import uuid
 from dotenv import load_dotenv
 
 # Charger les variables d'environnement
@@ -23,7 +24,7 @@ class VectorStore:
             self.client.create_collection(
                 collection_name=self.collection_name,
                 vectors_config=models.VectorParams(
-                    size=self.vector_size,  # Dimension des vecteurs Voyage Multimodal-3
+                    size=self.vector_size,
                     distance=models.Distance.COSINE
                 )
             )
@@ -37,22 +38,32 @@ class VectorStore:
         if len(vectors[0]) != self.vector_size:
             raise ValueError(f"La dimension des vecteurs doit être {self.vector_size}")
 
+        # S'assurer que tous les IDs sont des UUID valides
+        point_ids = [str(uuid.uuid4()) for _ in vectors] if ids is None else ids
+
+        # Vérifier que tous les IDs sont valides
+        for point_id in point_ids:
+            try:
+                uuid.UUID(point_id)
+            except ValueError:
+                raise ValueError(f"ID invalide: {point_id}. Les IDs doivent être des UUID valides.")
+
         points = [
             models.PointStruct(
-                id=str(i) if ids is None else ids[i],
-                vector=vector,
-                payload=metadata[i]
+                id=point_id,
+                vector=vector.copy(),  # Copie pour éviter les modifications
+                payload=meta.copy()
             )
-            for i, vector in enumerate(vectors)
+            for point_id, vector, meta in zip(point_ids, vectors, metadata)
         ]
 
         try:
             operation_info = self.client.upsert(
                 collection_name=self.collection_name,
-                points=points
+                points=points,
+                wait=True
             )
-
-            return [str(point.id) for point in points]
+            return point_ids
             
         except Exception as e:
             print(f"Erreur lors de l'ajout des vecteurs: {str(e)}")
@@ -60,24 +71,29 @@ class VectorStore:
 
     def search(self, query_vector: List[float], limit: int = 5) -> List[Dict]:
         """Recherche les documents les plus similaires"""
-        if len(query_vector) != self.vector_size:
-            raise ValueError(f"La dimension du vecteur de requête doit être {self.vector_size}")
-
         try:
+            if len(query_vector) != self.vector_size:
+                raise ValueError(f"La dimension du vecteur de requête doit être {self.vector_size}")
+
             search_result = self.client.search(
                 collection_name=self.collection_name,
                 query_vector=query_vector,
-                limit=limit
+                limit=limit,
+                with_payload=True
             )
 
-            return [
-                {
-                    'score': hit.score,
-                    'metadata': hit.payload,
-                    'id': hit.id
+            # Formater les résultats
+            results = []
+            for hit in search_result:
+                result = {
+                    'score': float(hit.score),  # Convertir en float Python standard
+                    'id': str(hit.id),
+                    'metadata': hit.payload
                 }
-                for hit in search_result
-            ]
+                results.append(result)
+
+            return results
+            
         except Exception as e:
             print(f"Erreur lors de la recherche: {str(e)}")
             return []
@@ -85,20 +101,20 @@ class VectorStore:
     def clear_collection(self):
         """Supprime tous les points de la collection"""
         try:
-            self.client.delete_collection(self.collection_name)
+            if self.collection_name in [c.name for c in self.client.get_collections().collections]:
+                self.client.delete_collection(self.collection_name)
             self._ensure_collection()
         except Exception as e:
             print(f"Erreur lors du nettoyage de la collection: {str(e)}")
-            raise
 
     def get_collection_info(self) -> Dict:
         """Récupère les informations sur la collection"""
         try:
-            collection_info = self.client.get_collection(self.collection_name)
+            stats = self.client.get_collection(self.collection_name)
             return {
-                'vectors_count': collection_info.vectors_count,
-                'indexed_vectors_count': collection_info.indexed_vectors_count,
-                'status': collection_info.status
+                "vectors_count": stats.vectors_count,
+                "indexed_vectors_count": getattr(stats, 'indexed_vectors_count', 0),
+                "status": getattr(stats, 'status', 'unknown')
             }
         except Exception as e:
             print(f"Erreur lors de la récupération des infos de collection: {str(e)}")
