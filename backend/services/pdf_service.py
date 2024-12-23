@@ -7,6 +7,9 @@ import shutil
 import json
 from dotenv import load_dotenv
 import voyageai
+import base64
+import io
+from PIL import Image
 from .vector_store import VectorStore
 import uuid
 
@@ -24,61 +27,72 @@ class PDFService:
         # Initialiser les clients
         self.voyage_client = voyageai.Client()
         self.vector_store = VectorStore()
-        self.model = "voyage-2"  # Changé pour utiliser voyage-2 au lieu de multimodal
+        self.model = "voyage-multimodal-3"
         print(f"Initialisé avec le modèle {self.model}")
         
         self.load_index()
-        
-    def load_index(self):
-        """Charge l'index existant ou en crée un nouveau"""
-        if self.index_file.exists():
-            with open(self.index_file, 'r', encoding='utf-8') as f:
-                self.index = json.load(f)
-                print(f"Index chargé avec {len(self.index)} documents")
-        else:
-            self.index = {}
-            print("Nouvel index créé")
-            
-    def save_index(self):
-        """Sauvegarde l'index sur le disque"""
-        with open(self.index_file, 'w', encoding='utf-8') as f:
-            json.dump(self.index, f, ensure_ascii=False, indent=2)
-        print(f"Index sauvegardé avec {len(self.index)} documents")
 
-    def _extract_text_from_pdf(self, doc) -> List[Dict]:
-        """Extrait et vectorise le texte d'un document PDF"""
-        chunks_with_embeddings = []
-        for page_num, page in enumerate(doc, 1):
-            text_content = page.get_text().strip()
-            if not text_content:  # Skip empty pages
-                continue
-                
-            # Diviser le texte en morceaux
-            chunk_size = 1000
-            text_chunks = [text_content[i:i+chunk_size] 
-                         for i in range(0, len(text_content), chunk_size)]
-            
-            for chunk in text_chunks:
-                if chunk.strip():  # Vérifier que le chunk n'est pas vide
-                    try:
-                        # Générer l'embedding
-                        embedding = self.voyage_client.embed(
-                            [chunk],
-                            model=self.model,
-                            input_type="document"
-                        ).embeddings[0]
-                        
-                        chunks_with_embeddings.append({
-                            'id': str(uuid.uuid4()),
-                            'text': chunk,
-                            'page_num': page_num,
-                            'embedding': embedding
-                        })
-                    except Exception as e:
-                        print(f"Erreur lors de la vectorisation: {str(e)}")
-                        
-        return chunks_with_embeddings
+    def _image_to_base64(self, image) -> str:
+        """Convertit une image en base64 pour l'API Voyage"""
+        buffered = io.BytesIO()
+        if not isinstance(image, Image.Image):
+            image = Image.open(io.BytesIO(image))
+        image.save(buffered, format="PNG")
+        img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        return f"data:image/png;base64,{img_str}"
         
+    def _create_multimodal_content(self, text: str, images: List[bytes] = None) -> List[Dict]:
+        """Crée le contenu multimodal pour l'API Voyage"""
+        content = []
+        
+        # Ajouter le texte
+        if text.strip():
+            content.append({
+                "type": "text",
+                "text": text.strip()
+            })
+        
+        # Ajouter les images
+        if images:
+            for img in images:
+                content.append({
+                    "type": "image_base64",
+                    "image_base64": self._image_to_base64(img)
+                })
+        
+        return content
+
+    async def get_multimodal_embedding(self, text: str, images: List[bytes] = None) -> List[float]:
+        """Obtient l'embedding pour du contenu multimodal"""
+        content = self._create_multimodal_content(text, images)
+        if not content:
+            raise ValueError("Aucun contenu valide fourni pour l'embedding")
+        
+        response = await self.voyage_client.client.post(
+            "https://api.voyageai.com/v1/multimodalembeddings",
+            json={
+                "inputs": [{"content": content}],
+                "model": self.model,
+                "input_type": "document"
+            }
+        )
+        
+        result = response.json()
+        return result['data'][0]['embedding']
+
+    def _extract_images_from_page(self, page) -> List[bytes]:
+        """Extrait les images d'une page PDF"""
+        images = []
+        for img in page.get_images(full=True):
+            try:
+                xref = img[0]
+                base_image = page.parent.extract_image(xref)
+                if base_image and base_image['width'] > 100 and base_image['height'] > 100:
+                    images.append(base_image['image'])
+            except Exception as e:
+                print(f"Erreur lors de l'extraction d'image: {str(e)}")
+        return images
+
     async def process_pdf(self, file: bytes, filename: str) -> Dict:
         """Process and index a PDF file"""
         print(f"Traitement du fichier {filename}")
@@ -92,27 +106,44 @@ class PDFService:
         file_path.write_bytes(file)
         
         try:
-            # Extraire le texte
+            # Extraire le texte et les images
             doc = fitz.open(str(file_path))
-            chunks = self._extract_text_from_pdf(doc)
-            doc.close()
+            chunks = []
+            
+            for page_num, page in enumerate(doc, 1):
+                text_content = page.get_text().strip()
+                images = self._extract_images_from_page(page)
+                
+                if text_content or images:
+                    # Générer l'embedding multimodal
+                    try:
+                        embedding = await self.get_multimodal_embedding(text_content, images)
+                        
+                        chunks.append({
+                            'id': str(uuid.uuid4()),
+                            'text': text_content,
+                            'has_images': bool(images),
+                            'image_count': len(images),
+                            'page_num': page_num,
+                            'embedding': embedding
+                        })
+                    except Exception as e:
+                        print(f"Erreur lors de la vectorisation de la page {page_num}: {str(e)}")
             
             if not chunks:
-                raise ValueError("Aucun contenu textuel exploitable trouvé dans le PDF")
-            
-            # Préparer les données pour Qdrant
-            vectors = [chunk['embedding'] for chunk in chunks]
-            metadata = [
-                {
-                    'filename': filename,
-                    'page_num': chunk['page_num'],
-                    'chunk_text': chunk['text']
-                } 
-                for chunk in chunks
-            ]
-            ids = [chunk['id'] for chunk in chunks]
+                raise ValueError("Aucun contenu exploitable trouvé dans le PDF")
             
             # Ajouter à Qdrant
+            vectors = [chunk['embedding'] for chunk in chunks]
+            metadata = [{
+                'filename': filename,
+                'page_num': chunk['page_num'],
+                'text': chunk['text'],
+                'has_images': chunk['has_images'],
+                'image_count': chunk['image_count']
+            } for chunk in chunks]
+            ids = [chunk['id'] for chunk in chunks]
+            
             self.vector_store.add_vectors(vectors, metadata, ids)
             
             # Créer l'entrée d'index
@@ -120,7 +151,7 @@ class PDFService:
                 'filename': filename,
                 'path': str(file_path),
                 'upload_date': datetime.now().isoformat(),
-                'page_count': doc.page_count if doc else 0,
+                'page_count': len(doc),
                 'chunk_count': len(chunks),
                 'chunk_ids': ids
             }
