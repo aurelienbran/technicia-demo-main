@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import logging
-from routers import pdf_router, chat_router
+from backend.routers import pdf_router, chat_router
 
 # Version simplifiée pour le démarrage
 app = FastAPI(
