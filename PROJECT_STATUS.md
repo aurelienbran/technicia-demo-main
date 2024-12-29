@@ -29,56 +29,68 @@ TechnicIA Demo est un prototype de chatbot technique capable d'analyser et de r�
 - Gestion des collections
 - Système d'indexation
 
-## 🚨 Problèmes Actuels
+## 🚨 Tests à Finaliser
 
-### Sécurité (❌)
-```
-ALERTE CRITIQUE : Malware détecté
-- Fichier : technicia-demo-main-main.zip
-- Type : Trojan/Wacatac.B!ml
-- Niveau : Grave
-- Date : 29/12/2024 05:04
-```
+### 1. Tests Unitaires
 
-### Actions Immédiates Requises
-1. ⚠️ Ne pas utiliser le .zip actuel
-2. ⚠️ Créer un nouveau repository propre
-3. ⚠️ Migration sécurisée du code
+#### Service PDF
+- [ ] Test de l'extraction de texte
+  - Vérifier la qualité de l'extraction
+  - Tester différents formats de PDFs
+  - Validation du nettoyage des fichiers temporaires
 
-### Tests (⚠️)
-- Plusieurs tests échouent encore
-- Problèmes avec IDs Qdrant
-- Gestion des fichiers temporaires à améliorer
-- Tests d'intégration manquants
+- [ ] Test de l'extraction d'images
+  - Vérifier la détection correcte des images
+  - Validation des dimensions minimales
+  - Test des différents formats d'images
 
-## 📋 Plan d'Action
+- [ ] Test du traitement multimodal
+  - Vérifier la création des embeddings
+  - Validation de la fusion texte + images
+  - Test des limites de taille
 
-### 1. Sécurisation Immédiate
-- [ ] Créer nouveau repository
-- [ ] Ajouter .gitignore complet
-- [ ] Configurer GitHub Actions
-  - Scan de sécurité
-  - Vérification du code
-  - Tests automatiques
-- [ ] Migration sécurisée du code
+#### Service Vector Store (Qdrant)
+- [ ] Test des opérations CRUD
+  - Création de vecteurs avec UUID valides
+  - Mise à jour des vecteurs existants
+  - Suppression de vecteurs
 
-### 2. Correction des Tests
-- [ ] Corriger gestion des IDs Qdrant
-- [ ] Améliorer cleanup des fichiers
-- [ ] Finaliser tests d'intégration
-- [ ] Vérifier couverture de code
+- [ ] Test de recherche
+  - Recherche par similarité
+  - Validation des scores
+  - Test de performances
 
-### 3. Documentation
-- [ ] Guide d'installation
-- [ ] Documentation API (Swagger)
-- [ ] Guide utilisateur
-- [ ] Exemples d'utilisation
+#### Service Claude
+- [ ] Test de génération de réponses
+  - Validation du format des réponses
+  - Test des différents types de questions
+  - Vérification des citations
 
-### 4. Optimisations
-- [ ] Gestion mémoire PDFs volumineux
-- [ ] Configuration fine embeddings
-- [ ] Amélioration prompts Claude
-- [ ] Cache des requêtes fréquentes
+### 2. Tests d'Intégration
+
+#### Workflow Complet
+- [ ] Test upload -> traitement -> recherche
+  - Upload de document
+  - Extraction et vectorisation
+  - Recherche dans le document
+  - Génération de réponse
+
+#### API Endpoints
+- [ ] Test des différentes routes
+  - Validation des formats de requête/réponse
+  - Gestion des erreurs
+  - Limites et contraintes
+
+### 3. Tests de Performance
+- [ ] Test de charge
+  - Uploads simultanés
+  - Recherches multiples
+  - Temps de réponse
+
+- [ ] Test de mémoire
+  - Gestion des gros fichiers
+  - Fuites mémoire
+  - Nettoyage des ressources
 
 ## 🔧 Structure Actuelle
 ```
@@ -126,9 +138,8 @@ QDRANT_PORT=6333
 - Tests : 10/14 passent (71%)
 - Couverture : Non mesurée
 - Endpoints : 8 implémentés
-- Issues : 1 critique (sécurité)
 
 ## 🔜 Prochaines Étapes
-1. Migration sécurisée
-2. Finalisation tests
-3. Documentation
+1. Finalisation des tests unitaires et d'intégration
+2. Documentation
+3. Optimisation des performances
