@@ -1,9 +1,12 @@
 import os
 import voyageai
 from typing import List, Dict
+from dotenv import load_dotenv
 
 class VoyageEmbedding:
     def __init__(self):
+        load_dotenv()
+        voyageai.api_key = os.getenv("VOYAGE_API_KEY")
         self.client = voyageai.Client()
         self.model = "voyage-2"
 
