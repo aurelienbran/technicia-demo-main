@@ -1,35 +1,48 @@
 import fitz
 from typing import List, Dict
-from .voyage_embedding import VoyageEmbedding
+import io
+from PIL import Image
 
 class PDFProcessor:
     def __init__(self):
-        self.embedder = VoyageEmbedding()
+        self.model = "voyage-multimodal-2"
         self.chunk_size = 1000
     
-    def extract_text(self, pdf_path: str) -> List[str]:
+    def extract_content(self, pdf_path: str) -> List[Dict]:
         doc = fitz.open(pdf_path)
-        chunks = []
-        buffer = ""
+        contents = []
         
         for page in doc:
+            # Extraire le texte
             text = page.get_text()
-            buffer += text
+            if text.strip():
+                contents.append({"type": "text", "content": text})
             
-            while len(buffer) >= self.chunk_size:
-                chunks.append(buffer[:self.chunk_size])
-                buffer = buffer[self.chunk_size:]
+            # Extraire les images
+            for img_index, img in enumerate(page.get_images()):
+                xref = img[0]
+                base_image = doc.extract_image(xref)
+                image_bytes = base_image["image"]
+                
+                # Convertir en PIL Image pour vérification
+                image = Image.open(io.BytesIO(image_bytes))
+                
+                # Vérifier la qualité de l'image
+                if image.size[0] > 100 and image.size[1] > 100:  # Ignorer les très petites images
+                    contents.append({"type": "image", "content": image_bytes})
         
-        if buffer:
-            chunks.append(buffer)
-            
-        return chunks
+        return contents
     
     async def process_pdf(self, pdf_path: str) -> List[Dict]:
-        chunks = self.extract_text(pdf_path)
-        embeddings = await self.embedder.get_embeddings(chunks)
+        contents = self.extract_content(pdf_path)
+        processed_contents = []
         
-        return [{
-            "text": chunk,
-            "embedding": embedding
-        } for chunk, embedding in zip(chunks, embeddings)]
+        for content in contents:
+            if content["type"] == "text":
+                text = content["content"]
+                chunks = [text[i:i+self.chunk_size] for i in range(0, len(text), self.chunk_size)]
+                processed_contents.extend([{"type": "text", "content": chunk} for chunk in chunks])
+            else:
+                processed_contents.append(content)
+                
+        return processed_contents
