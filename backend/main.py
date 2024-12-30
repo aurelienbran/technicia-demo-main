@@ -1,7 +1,11 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import logging
-from .routers import pdf_router, chat_router
+import sys
+import os
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from backend.routers import pdf_router, chat_router
 
 app = FastAPI(
     title="TechnicIA API",
