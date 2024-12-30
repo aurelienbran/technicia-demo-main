@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import logging
-from routers import pdf_router, chat_router
+from backend.routers import pdf_router, chat_router
 
 # Version simplifiée pour le démarrage
 app = FastAPI(
@@ -31,9 +31,7 @@ app.include_router(chat_router.router)
 async def root():
     """Route racine pour vérifier que l'API fonctionne"""
     return {
-        "status": "online",
-        "service": "TechnicIA API",
-        "version": "1.0.0"
+        "status": "healthy"
     }
 
 @app.get("/ping")
