@@ -19,6 +19,7 @@ class IndexingService:
         self.embedding = EmbeddingService()
         self.vector_store = VectorStore()
         self.rate_limit_delay = 0.1
+        self._processed_hashes = set()  # Cache local des hashes
         logger.info("Indexing service initialized")
 
     async def index_document(self, file_path: str) -> Dict:
@@ -29,13 +30,13 @@ class IndexingService:
             
             async for chunk, page_num in self._stream_pdf_chunks(file_path):
                 try:
-                    # Vérifier si le chunk est déjà indexé
+                    # Vérifier si le chunk est déjà traité
                     chunk_hash = self._generate_hash(chunk)
-                    if await self._is_chunk_indexed(chunk_hash):
-                        logger.debug(f"Chunk already indexed, skipping: {chunk_hash}")
+                    if chunk_hash in self._processed_hashes:
+                        logger.debug(f"Chunk already processed, skipping: {chunk_hash}")
                         continue
 
-                    # Générer l'embedding pour le chunk
+                    # Générer l'embedding
                     embedding = await self.embedding.get_embedding(chunk)
                     
                     # Préparer le payload
@@ -54,13 +55,14 @@ class IndexingService:
                         payloads=[payload]
                     )
                     
+                    self._processed_hashes.add(chunk_hash)
                     chunks_processed += 1
                     logger.debug(f"Processed chunk {chunks_processed} from page {page_num}")
                     
                     await asyncio.sleep(self.rate_limit_delay)
                     
                 except Exception as e:
-                    logger.error(f"Error processing chunk {chunks_processed} of {file_path}: {str(e)}")
+                    logger.error(f"Error processing chunk {chunks_processed}: {str(e)}")
                     continue
 
             logger.info(f"Successfully indexed {file_path}: {chunks_processed} chunks processed")
@@ -90,7 +92,7 @@ class IndexingService:
             results = await self.vector_store.search(
                 query_vector=query_embedding,
                 limit=limit,
-                score_threshold=0.0  # Pas de seuil pour récupérer les meilleurs résultats
+                score_threshold=0.0
             )
 
             # Préparer le contexte pour Claude
@@ -116,10 +118,9 @@ class IndexingService:
                     
                     return {
                         "answer": answer,
-                        "sources": results  # Garder les sources pour référence
+                        "sources": results
                     }
 
-            # Aucun résultat pertinent
             return {
                 "answer": "Je ne trouve pas d'information pertinente pour répondre à cette question dans les documents fournis.",
                 "sources": []
@@ -144,17 +145,8 @@ class IndexingService:
             doc.close()
             return metadata
         except Exception as e:
-            logger.error(f"Error getting PDF metadata for {file_path}: {str(e)}")
+            logger.error(f"Error getting PDF metadata: {str(e)}")
             raise
-
-    async def _is_chunk_indexed(self, chunk_hash: str) -> bool:
-        """Vérifie si un chunk est déjà indexé."""
-        try:
-            results = await self.vector_store.search_by_hash(chunk_hash)
-            return len(results) > 0
-        except Exception as e:
-            logger.error(f"Error checking chunk hash {chunk_hash}: {str(e)}")
-            return False
 
     async def _stream_pdf_chunks(self, file_path: str) -> AsyncGenerator[tuple[str, int], None]:
         """Génère les chunks de texte d'un PDF."""
@@ -192,7 +184,7 @@ class IndexingService:
                 yield text_buffer.strip(), len(doc)
                 
         except Exception as e:
-            logger.error(f"Error streaming PDF {file_path}: {str(e)}")
+            logger.error(f"Error streaming PDF: {str(e)}")
             raise
         finally:
             if doc:
