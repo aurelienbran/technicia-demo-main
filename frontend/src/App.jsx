@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { FileText, Send, Upload } from 'lucide-react';
 
+const API_URL = 'http://localhost:8000';
+
 const App = () => {
   const [file, setFile] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -22,7 +24,7 @@ const App = () => {
     formData.append('file', file);
 
     try {
-      const response = await fetch('/api/index/file', {
+      const response = await fetch(`${API_URL}/api/index/file`, {
         method: 'POST',
         body: formData
       });
@@ -54,7 +56,7 @@ const App = () => {
     setMessages(prev => [...prev, { type: 'user', content: query }]);
 
     try {
-      const response = await fetch('/api/query', {
+      const response = await fetch(`${API_URL}/api/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query })
