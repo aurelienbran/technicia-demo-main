@@ -34,7 +34,7 @@ class VectorStore:
                 collection_name=self.collection_name,
                 vectors_config=VectorParams(
                     size=settings.VECTOR_SIZE,
-                    distance=Distance.COSINE
+                    distance=Distance.DOT  # Changement pour produit scalaire
                 )
             )
 
@@ -74,6 +74,10 @@ class VectorStore:
                     for idx, (vector, payload) in enumerate(zip(batch_vectors, batch_payloads))
                 ]
 
+                # Affichage pour debug
+                logger.debug(f"Ajout d'un batch de {len(points)} points")
+                logger.debug(f"Premier vecteur du batch: {points[0].vector[:5]}...")
+                
                 self.client.upsert(
                     collection_name=self.collection_name,
                     points=points
@@ -89,14 +93,22 @@ class VectorStore:
         self,
         query_vector: List[float],
         limit: int = 5,
-        score_threshold: float = 0.3,  # Seuil de similarité plus bas pour Voyage AI
+        score_threshold: float = 0.3,
         filter_conditions: Optional[Dict] = None
     ) -> List[Dict]:
         """
         Recherche les documents les plus similaires.
         """
         try:
-            # Traiter filter_conditions pour utiliser models.Filter
+            # Logging du vecteur de requête
+            logger.debug(f"Query vector preview: {query_vector[:5]}...")
+            
+            # Vérifier que la collection existe
+            info = await self.get_collection_info()
+            logger.info(f"Searching in collection with {info['points_count']} points")
+
+            # Traiter filter_conditions
+            final_filter = None
             if filter_conditions:
                 final_filter = models.Filter(
                     must=[
@@ -106,36 +118,39 @@ class VectorStore:
                         ) for key, value in filter_conditions.items()
                     ]
                 )
-            else:
-                final_filter = None
 
+            # Recherche
             search_result = self.client.search(
                 collection_name=self.collection_name,
                 query_vector=query_vector,
                 limit=limit,
                 score_threshold=score_threshold,
-                query_filter=final_filter
+                query_filter=final_filter,
+                with_vectors=True  # Pour debug
             )
 
-            # Log les scores pour debugging
+            # Log les résultats
             if not search_result:
                 logger.warning("No results found")
             else:
-                logger.info(f"Found {len(search_result)} results with scores: {[r.score for r in search_result]}")
+                for idx, point in enumerate(search_result):
+                    logger.info(f"Result {idx + 1}: score={point.score:.4f}, id={point.id}")
+                    logger.debug(f"Vector preview: {point.vector[:5]}...")
+                    if hasattr(point, 'payload') and 'text' in point.payload:
+                        logger.debug(f"Text preview: {point.payload['text'][:100]}...")
 
-            results = []
-            for scored_point in search_result:
-                result = {
-                    "score": scored_point.score,
-                    "payload": scored_point.payload,
-                    "id": scored_point.id
-                }
-                results.append(result)
+            # Formater les résultats
+            results = [{
+                "score": point.score,
+                "payload": point.payload,
+                "id": point.id
+            } for point in search_result]
 
             return results
 
         except Exception as e:
             logger.error(f"Error searching vectors: {str(e)}")
+            logger.error(f"Exception details: {str(e.__class__.__name__)}: {str(e)}")
             raise
 
     async def search_by_hash(self, chunk_hash: str) -> List[Dict]:
