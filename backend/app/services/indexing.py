@@ -42,28 +42,54 @@ class IndexingService:
                 "file_path": str(file_path),
             }
             logger.info(f"Document metadata: {metadata}")
-
-            # Traiter le document page par page
-            chunks_processed = 0
+            
+            total_chunks = 0
+            chunks_dict = {}
+            
+            # Première passe : collecter tous les chunks
             for page_num in range(len(doc)):
-                try:
-                    page = doc[page_num]
-                    page_text = page.get_text()
+                logger.info(f"Processing page {page_num + 1} of {len(doc)}")
+                page = doc[page_num]
+                page_text = page.get_text().strip()
+                
+                if not page_text:  # Ignorer les pages vides
+                    continue
                     
-                    # Découper le texte en chunks
-                    text_chunks = self._split_text(page_text)
-                    logger.debug(f"Page {page_num + 1}: {len(text_chunks)} chunks")
+                # Découper la page en chunks
+                page_chunks = []
+                current_chunk = ""
+                sentences = page_text.replace('\n', ' ').split('.')
+                
+                for sentence in sentences:
+                    sentence = sentence.strip() + "."
+                    if len(current_chunk) + len(sentence) > self.chunk_size:
+                        if current_chunk:
+                            page_chunks.append(current_chunk)
+                        current_chunk = sentence
+                    else:
+                        current_chunk += " " + sentence if current_chunk else sentence
+                
+                if current_chunk:  # Ne pas oublier le dernier chunk
+                    page_chunks.append(current_chunk)
+                
+                chunks_dict[page_num] = page_chunks
+                total_chunks += len(page_chunks)
+            
+            # Deuxième passe : indexer les chunks
+            chunks_processed = 0
+            for page_num, page_chunks in chunks_dict.items():
+                for chunk in page_chunks:
+                    chunk = chunk.strip()
+                    if not chunk:
+                        continue
                     
-                    for chunk in text_chunks:
-                        if not chunk.strip():
-                            continue
-                            
-                        # Générer le hash et vérifier si déjà traité
-                        chunk_hash = self._generate_hash(chunk)
-                        if chunk_hash in self._processed_chunks:
-                            continue
-
-                        # Générer l'embedding et stocker
+                    chunk_hash = self._generate_hash(chunk)
+                    if chunk_hash in self._processed_chunks:
+                        logger.debug(f"Skipping duplicate chunk: {chunk[:50]}...")
+                        continue
+                    
+                    # Générer l'embedding
+                    try:
                         embedding = await self.embedding.get_embedding(chunk)
                         await self.vector_store.add_vectors(
                             vectors=[embedding],
@@ -79,18 +105,21 @@ class IndexingService:
                         
                         self._processed_chunks.add(chunk_hash)
                         chunks_processed += 1
+                        logger.info(f"Processed chunk {chunks_processed}/{total_chunks} (page {page_num + 1})")
                         
+                        # Rate limiting
                         await asyncio.sleep(self.rate_limit_delay)
                         
-                except Exception as e:
-                    logger.error(f"Error processing page {page_num + 1}: {str(e)}")
-                    continue
+                    except Exception as e:
+                        logger.error(f"Error processing chunk on page {page_num + 1}: {str(e)}")
+                        continue
 
             logger.info(f"Successfully indexed {file_path}: {chunks_processed} chunks processed")
             return {
                 "status": "success",
                 "file": file_path,
                 "chunks_processed": chunks_processed,
+                "total_chunks": total_chunks,
                 "metadata": metadata
             }
 
@@ -104,39 +133,10 @@ class IndexingService:
                 "error": str(e),
                 "chunks_processed": 0
             }
+            
         finally:
             if doc:
                 doc.close()
-
-    def _split_text(self, text: str) -> List[str]:
-        """
-        Découpe un texte en chunks avec chevauchement.
-        """
-        chunks = []
-        current_pos = 0
-        text = text.strip()
-        
-        if not text:  # Ignorer les textes vides
-            return chunks
-
-        while current_pos < len(text):
-            # Trouver une bonne fin de chunk
-            end_pos = min(current_pos + self.chunk_size, len(text))
-            
-            if end_pos < len(text):
-                # Chercher la dernière phrase complète
-                last_period = text.rfind(".", current_pos, end_pos)
-                if last_period != -1:
-                    end_pos = last_period + 1
-
-            chunk = text[current_pos:end_pos].strip()
-            if chunk:  # Ignorer les chunks vides
-                chunks.append(chunk)
-            
-            # Avancer avec chevauchement
-            current_pos = max(current_pos + 1, end_pos - self.chunk_overlap)
-
-        return chunks
 
     @staticmethod
     def _generate_hash(text: str) -> str:
