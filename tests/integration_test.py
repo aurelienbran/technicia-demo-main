@@ -11,9 +11,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger("technicia.test")
 
-# Ajout du chemin backend au PYTHONPATH
-backend_path = Path(__file__).parent.parent / "backend"
+# Ajustement du chemin pour trouver le package backend
+project_root = Path(__file__).parent.parent
+backend_path = project_root / "backend"
 sys.path.append(str(backend_path))
+
+# S'assurer que nous sommes dans le bon dossier pour .env
+os.chdir(str(backend_path))
 
 from app.core.config import settings
 from app.services.vector_store import VectorStore
@@ -110,15 +114,15 @@ async def run_tests():
         await test.test_embeddings()
         
         # Test de l'indexation PDF (si un fichier est fourni)
-        pdf_path = os.path.join("backend", "docs", "test.pdf")
-        if os.path.exists(pdf_path):
-            await test.test_pdf_indexing(pdf_path)
+        test_pdf = project_root / "backend" / "docs" / "test.pdf"
+        if test_pdf.exists():
+            await test.test_pdf_indexing(str(test_pdf))
             
             # Test de recherche
             query = "Quel est le sujet principal de ce document?"
             await test.test_search_and_response(query)
         else:
-            logger.warning(f"⚠️ Fichier PDF de test non trouvé: {pdf_path}")
+            logger.warning(f"⚠️ Fichier PDF de test non trouvé: {test_pdf}")
         
         logger.info("🎉 Tous les tests ont réussi!")
         
@@ -128,9 +132,9 @@ async def run_tests():
 
 if __name__ == "__main__":
     # Création des dossiers nécessaires
-    os.makedirs("backend/docs", exist_ok=True)
-    os.makedirs("storage/pdfs", exist_ok=True)
-    os.makedirs("storage/index", exist_ok=True)
+    os.makedirs(str(project_root / "backend" / "docs"), exist_ok=True)
+    os.makedirs(str(project_root / "storage" / "pdfs"), exist_ok=True)
+    os.makedirs(str(project_root / "storage" / "index"), exist_ok=True)
     
     # Exécution des tests
     asyncio.run(run_tests())
