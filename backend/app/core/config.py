@@ -27,9 +27,16 @@ class Settings(BaseSettings):
     
     # Logging
     LOG_LEVEL: str = "INFO"
+    DEBUG: bool = False
+    
+    # Storage Configuration
+    STORAGE_PATH: str = "storage/pdfs"
+    INDEX_PATH: str = "storage/index"
     
     class Config:
         env_file = ".env"
         case_sensitive = True
+        # Autoriser des champs supplémentaires dans le fichier .env
+        extra = "allow"
 
 settings = Settings()
