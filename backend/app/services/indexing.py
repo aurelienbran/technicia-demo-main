@@ -1,10 +1,11 @@
-from typing import List, Dict, Generator, AsyncGenerator
 import logging
 import asyncio
-import fitz  # PyMuPDF
-import hashlib
-from pathlib import Path
+from typing import List, Dict, AsyncGenerator
 from datetime import datetime
+from pathlib import Path
+import hashlib
+import fitz
+
 from .claude import ClaudeService
 from .embedding import EmbeddingService
 from .vector_store import VectorStore
@@ -17,143 +18,70 @@ class IndexingService:
         self.claude = ClaudeService()
         self.embedding = EmbeddingService()
         self.vector_store = VectorStore()
-        self.chunk_size = settings.CHUNK_SIZE
-        self.chunk_overlap = settings.CHUNK_OVERLAP
-        self.rate_limit_delay = 0.1  # 100ms entre les requêtes
-        self._processed_chunks = set()  # Cache local des chunks traités
+        self.rate_limit_delay = 0.1
         logger.info("Indexing service initialized")
 
     async def index_document(self, file_path: str) -> Dict:
-        """
-        Indexe un document PDF.
-        """
-        doc = None
+        """Index et traite un document PDF."""
         try:
-            logger.info(f"Opening document: {file_path}")
-            doc = fitz.open(file_path)
-            
-            # Extraire les métadonnées
-            metadata = {
-                "filename": Path(file_path).name,
-                "title": doc.metadata.get("title", ""),
-                "author": doc.metadata.get("author", ""),
-                "doc_type": "pdf",
-                "page_count": len(doc),
-                "file_path": str(file_path),
-            }
-            logger.info(f"Document metadata: {metadata}")
-            
-            total_chunks = 0
-            chunks_dict = {}
-            
-            # Première passe : collecter tous les chunks
-            for page_num in range(len(doc)):
-                logger.info(f"Processing page {page_num + 1} of {len(doc)}")
-                page = doc[page_num]
-                page_text = page.get_text().strip()
-                
-                if not page_text:  # Ignorer les pages vides
-                    continue
-                    
-                # Découper la page en chunks
-                page_chunks = []
-                current_chunk = ""
-                sentences = page_text.replace('\n', ' ').split('.')
-                
-                for sentence in sentences:
-                    sentence = sentence.strip() + "."
-                    if len(current_chunk) + len(sentence) > self.chunk_size:
-                        if current_chunk:
-                            page_chunks.append(current_chunk)
-                        current_chunk = sentence
-                    else:
-                        current_chunk += " " + sentence if current_chunk else sentence
-                
-                if current_chunk:  # Ne pas oublier le dernier chunk
-                    page_chunks.append(current_chunk)
-                
-                chunks_dict[page_num] = page_chunks
-                total_chunks += len(page_chunks)
-            
-            # Deuxième passe : indexer les chunks
+            metadata = await self._get_pdf_metadata(file_path)
             chunks_processed = 0
-            for page_num, page_chunks in chunks_dict.items():
-                for chunk in page_chunks:
-                    chunk = chunk.strip()
-                    if not chunk:
-                        continue
-                    
+            
+            async for chunk, page_num in self._stream_pdf_chunks(file_path):
+                try:
+                    # Vérifier si le chunk est déjà indexé
                     chunk_hash = self._generate_hash(chunk)
-                    if chunk_hash in self._processed_chunks:
-                        logger.debug(f"Skipping duplicate chunk: {chunk[:50]}...")
+                    if await self._is_chunk_indexed(chunk_hash):
+                        logger.debug(f"Chunk already indexed, skipping: {chunk_hash}")
                         continue
+
+                    # Générer l'embedding pour le chunk
+                    embedding = await self.embedding.get_embedding(chunk)
                     
-                    # Générer l'embedding
-                    try:
-                        embedding = await self.embedding.get_embedding(chunk)
-                        await self.vector_store.add_vectors(
-                            vectors=[embedding],
-                            payloads=[{
-                                **metadata,
-                                "page_number": page_num + 1,
-                                "chunk_index": chunks_processed,
-                                "text": chunk,
-                                "chunk_hash": chunk_hash,
-                                "indexed_at": datetime.utcnow().isoformat()
-                            }]
-                        )
-                        
-                        self._processed_chunks.add(chunk_hash)
-                        chunks_processed += 1
-                        logger.info(f"Processed chunk {chunks_processed}/{total_chunks} (page {page_num + 1})")
-                        
-                        # Rate limiting
-                        await asyncio.sleep(self.rate_limit_delay)
-                        
-                    except Exception as e:
-                        logger.error(f"Error processing chunk on page {page_num + 1}: {str(e)}")
-                        continue
+                    # Préparer le payload
+                    payload = {
+                        **metadata,
+                        "page_number": page_num,
+                        "chunk_index": chunks_processed,
+                        "text": chunk,
+                        "chunk_hash": chunk_hash,
+                        "indexed_at": datetime.utcnow().isoformat()
+                    }
+                    
+                    # Stocker dans Qdrant
+                    await self.vector_store.add_vectors(
+                        vectors=[embedding],
+                        payloads=[payload]
+                    )
+                    
+                    chunks_processed += 1
+                    logger.debug(f"Processed chunk {chunks_processed} from page {page_num}")
+                    
+                    await asyncio.sleep(self.rate_limit_delay)
+                    
+                except Exception as e:
+                    logger.error(f"Error processing chunk {chunks_processed} of {file_path}: {str(e)}")
+                    continue
 
             logger.info(f"Successfully indexed {file_path}: {chunks_processed} chunks processed")
             return {
                 "status": "success",
                 "file": file_path,
                 "chunks_processed": chunks_processed,
-                "total_chunks": total_chunks,
                 "metadata": metadata
             }
 
         except Exception as e:
             logger.error(f"Error indexing document {file_path}: {str(e)}")
-            import traceback
-            logger.error(traceback.format_exc())
             return {
                 "status": "error",
                 "file": file_path,
                 "error": str(e),
                 "chunks_processed": 0
             }
-            
-        finally:
-            if doc:
-                doc.close()
 
-    @staticmethod
-    def _generate_hash(text: str) -> str:
-        """
-        Génère un hash unique pour un texte.
-        """
-        return hashlib.md5(text.encode()).hexdigest()
-
-    async def search(
-        self,
-        query: str,
-        limit: int = 5,
-        score_threshold: float = 0.7
-    ) -> Dict:
-        """
-        Recherche dans les documents indexés.
-        """
+    async def search(self, query: str, limit: int = 5) -> Dict:
+        """Recherche dans les documents indexés et génère une réponse."""
         try:
             # Générer l'embedding pour la requête
             query_embedding = await self.embedding.get_embedding(query)
@@ -162,25 +90,115 @@ class IndexingService:
             results = await self.vector_store.search(
                 query_vector=query_embedding,
                 limit=limit,
-                score_threshold=score_threshold
+                score_threshold=0.0  # Pas de seuil pour récupérer les meilleurs résultats
             )
 
             # Préparer le contexte pour Claude
-            contexts = [r["payload"]["text"] for r in results]
-            context_text = "\n---\n".join(contexts)
+            if results:
+                # Extraire et déduplicate les textes
+                texts = []
+                unique_hashes = set()
+                for result in results:
+                    chunk_hash = result["payload"].get("chunk_hash")
+                    if chunk_hash and chunk_hash not in unique_hashes:
+                        text = result["payload"].get("text", "").strip()
+                        if text:
+                            texts.append(text)
+                            unique_hashes.add(chunk_hash)
 
-            # Obtenir une réponse de Claude
-            answer = await self.claude.get_response(
-                query=query,
-                context=context_text
-            )
+                # Former le contexte
+                if texts:
+                    context = "\n---\n".join(texts)
+                    prompt = f"Analyze and summarize this technical content. First understand what the document is about, then focus on answering this question: {query}\n\nContent to analyze:\n{context}"
+                    
+                    # Générer la réponse
+                    answer = await self.claude.get_response(prompt)
+                    
+                    return {
+                        "answer": answer,
+                        "sources": results  # Garder les sources pour référence
+                    }
 
+            # Aucun résultat pertinent
             return {
-                "answer": answer,
-                "sources": results,
-                "context_used": len(contexts)
+                "answer": "Je ne trouve pas d'information pertinente pour répondre à cette question dans les documents fournis.",
+                "sources": []
             }
 
         except Exception as e:
             logger.error(f"Error searching: {str(e)}")
             raise
+
+    async def _get_pdf_metadata(self, file_path: str) -> Dict:
+        """Extrait les métadonnées d'un PDF."""
+        try:
+            doc = fitz.open(file_path)
+            metadata = {
+                "filename": Path(file_path).name,
+                "title": doc.metadata.get("title", ""),
+                "author": doc.metadata.get("author", ""),
+                "doc_type": "pdf",
+                "page_count": len(doc),
+                "file_path": file_path,
+            }
+            doc.close()
+            return metadata
+        except Exception as e:
+            logger.error(f"Error getting PDF metadata for {file_path}: {str(e)}")
+            raise
+
+    async def _is_chunk_indexed(self, chunk_hash: str) -> bool:
+        """Vérifie si un chunk est déjà indexé."""
+        try:
+            results = await self.vector_store.search_by_hash(chunk_hash)
+            return len(results) > 0
+        except Exception as e:
+            logger.error(f"Error checking chunk hash {chunk_hash}: {str(e)}")
+            return False
+
+    async def _stream_pdf_chunks(self, file_path: str) -> AsyncGenerator[tuple[str, int], None]:
+        """Génère les chunks de texte d'un PDF."""
+        doc = None
+        try:
+            doc = fitz.open(file_path)
+            text_buffer = ""
+            
+            for page_num in range(len(doc)):
+                page = doc[page_num]
+                page_text = page.get_text()
+                
+                if not page_text.strip():
+                    continue
+                    
+                text_buffer += page_text + " "
+                
+                while len(text_buffer) >= settings.CHUNK_SIZE:
+                    # Trouver un point de coupure naturel
+                    breakpoint = text_buffer[:settings.CHUNK_SIZE].rfind(". ")
+                    if breakpoint == -1:
+                        breakpoint = text_buffer[:settings.CHUNK_SIZE].rfind(" ")
+                    if breakpoint == -1:
+                        breakpoint = settings.CHUNK_SIZE
+                    
+                    chunk = text_buffer[:breakpoint].strip()
+                    if chunk:  # Ne pas retourner les chunks vides
+                        yield chunk, page_num + 1
+                    
+                    # Garder le chevauchement pour le prochain chunk
+                    text_buffer = text_buffer[max(0, breakpoint - settings.CHUNK_OVERLAP):]
+            
+            # Traiter le dernier chunk
+            if text_buffer.strip():
+                yield text_buffer.strip(), len(doc)
+                
+        except Exception as e:
+            logger.error(f"Error streaming PDF {file_path}: {str(e)}")
+            raise
+        finally:
+            if doc:
+                doc.close()
+
+    @staticmethod
+    def _generate_hash(text: str) -> str:
+        """Génère un hash unique pour un texte."""
+        return hashlib.md5(text.encode()).hexdigest()
