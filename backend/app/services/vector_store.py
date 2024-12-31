@@ -153,12 +153,12 @@ class VectorStore:
         Récupère les informations sur la collection.
         """
         try:
-            collection_info = self.client.get_collection(self.collection_name)
+            info = self.client.get_collection(self.collection_name)
             return {
-                "vectors_count": collection_info.vectors_count,
-                "points_count": collection_info.points_count,
-                "status": collection_info.status,
-                "vector_size": collection_info.config.params.vectors.size
+                "name": self.collection_name,
+                "status": "active",
+                "vector_size": settings.VECTOR_SIZE,
+                "points_count": 0 if info is None else getattr(info, 'points_count', 0)
             }
         except Exception as e:
             logger.error(f"Error getting collection info: {str(e)}")
