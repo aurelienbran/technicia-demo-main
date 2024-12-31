@@ -1,154 +1,172 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState } from 'react';
+import { FileText, Send, Upload } from 'lucide-react';
 
-const ChatMessage = ({ isUser, content, isLoading, error }) => (
-  <div className={`flex mb-4 ${isUser ? 'justify-end' : 'justify-start'}`}>
-    <div className={`rounded-lg px-4 py-2 max-w-[80%] ${
-      isUser 
-        ? 'bg-blue-600 text-white' 
-        : error 
-          ? 'bg-red-100 text-red-600'
-          : 'bg-gray-100 text-gray-900'
-    }`}>
-      {isLoading ? (
-        <div className="flex items-center gap-2">
-          <div className="animate-spin h-4 w-4 border-2 border-blue-600 rounded-full border-t-transparent"/>
-          <span className="text-sm">TechnicIA réfléchit...</span>
-        </div>
-      ) : (
-        <p className="text-sm whitespace-pre-wrap">{content}</p>
-      )}
-    </div>
-  </div>
-);
+const App = () => {
+  const [file, setFile] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [query, setQuery] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
-export default function App() {
-  const [messages, setMessages] = useState([
-    {
-      isUser: false,
-      content: "Bonjour ! Je suis TechnicIA, votre assistant technique. Comment puis-je vous aider ?"
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file || !file.name.endsWith('.pdf')) {
+      alert('Veuillez sélectionner un fichier PDF');
+      return;
     }
-  ]);
-  const [input, setInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const messagesEndRef = useRef(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    setUploading(true);
+    setFile(file);
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await fetch('/api/index/file', {
+        method: 'POST',
+        body: formData
+      });
+      const result = await response.json();
+      
+      if (result.status === 'success') {
+        setMessages(prev => [...prev, {
+          type: 'system',
+          content: `Document ${file.name} indexé avec succès`
+        }]);
+      } else {
+        throw new Error(result.error);
+      }
+    } catch (error) {
+      setMessages(prev => [...prev, {
+        type: 'error',
+        content: `Erreur lors de l'indexation: ${error.message}`
+      }]);
+    } finally {
+      setUploading(false);
+    }
   };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!input.trim() || isLoading) return;
+    if (!query.trim()) return;
 
-    const userMessage = input.trim();
-    setInput('');
-    
-    // Ajoute le message de l'utilisateur
-    setMessages(prev => [...prev, { isUser: true, content: userMessage }]);
-    
-    // Ajoute un message "en cours" temporaire
-    setMessages(prev => [...prev, { 
-      isUser: false, 
-      content: '', 
-      isLoading: true 
-    }]);
-    
+    setLoading(true);
+    setMessages(prev => [...prev, { type: 'user', content: query }]);
+
     try {
-      const response = await fetch('http://localhost:8000/chat', {
+      const response = await fetch('/api/query', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({ query: userMessage })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query })
       });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
       
-      const data = await response.json();
-      
-      if (!data.response) {
-        throw new Error('Réponse invalide du serveur');
-      }
-      
-      // Remplace le message "en cours" par la vraie réponse
-      setMessages(prev => [
-        ...prev.slice(0, -1),
-        { isUser: false, content: data.response }
-      ]);
-
+      const result = await response.json();
+      setMessages(prev => [...prev, { 
+        type: 'assistant',
+        content: result.answer,
+        sources: result.sources
+      }]);
     } catch (error) {
-      console.error('Erreur lors de la requête:', error);
-      
-      // Remplace le message "en cours" par un message d'erreur
-      setMessages(prev => [
-        ...prev.slice(0, -1),
-        { 
-          isUser: false, 
-          content: "Désolé, une erreur s'est produite lors de la communication avec le serveur. Veuillez réessayer.", 
-          error: true 
-        }
-      ]);
+      setMessages(prev => [...prev, {
+        type: 'error',
+        content: `Erreur: ${error.message}`
+      }]);
     } finally {
-      setIsLoading(false);
+      setLoading(false);
+      setQuery('');
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4 flex items-center justify-center">
-      <div className="w-full max-w-2xl bg-white rounded-lg shadow-lg flex flex-col h-[600px]">
-        {/* Header */}
-        <div className="border-b p-4">
-          <h1 className="text-xl font-semibold">TechnicIA Demo</h1>
-        </div>
-        
-        {/* Messages */}
-        <div className="flex-1 p-4 overflow-auto">
-          <div className="space-y-4">
-            {messages.map((message, index) => (
-              <ChatMessage 
-                key={index}
-                isUser={message.isUser}
-                content={message.content}
-                isLoading={message.isLoading}
-                error={message.error}
+    <div className="flex flex-col h-screen bg-gray-100">
+      <header className="bg-white shadow-sm p-4">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
+          <h1 className="text-xl font-bold text-gray-800">TechnicIA Demo</h1>
+          <div className="flex items-center gap-2">
+            <label className="relative cursor-pointer">
+              <input
+                type="file"
+                className="hidden"
+                accept=".pdf"
+                onChange={handleFileUpload}
+                disabled={uploading}
               />
-            ))}
-            <div ref={messagesEndRef} />
+              <div className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                <Upload className="w-4 h-4" />
+                {uploading ? 'Indexation...' : 'Charger PDF'}
+              </div>
+            </label>
           </div>
         </div>
+      </header>
 
-        {/* Input */}
-        <div className="border-t p-4">
-          <form onSubmit={handleSubmit} className="flex gap-2">
+      <div className="flex-1 overflow-y-auto p-4">
+        <div className="max-w-3xl mx-auto space-y-4">
+          {messages.map((msg, idx) => (
+            <div
+              key={idx}
+              className={`p-4 rounded-lg ${
+                msg.type === 'user'
+                  ? 'bg-blue-500 text-white ml-12'
+                  : msg.type === 'assistant'
+                  ? 'bg-white shadow-sm'
+                  : msg.type === 'error'
+                  ? 'bg-red-100 text-red-700'
+                  : 'bg-gray-100'
+              }`}
+            >
+              <div className="prose max-w-none">
+                {msg.content}
+              </div>
+              
+              {msg.sources && msg.sources.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-gray-200">
+                  <details className="text-sm text-gray-600">
+                    <summary className="cursor-pointer hover:text-gray-900">
+                      Sources ({msg.sources.length})
+                    </summary>
+                    <ul className="mt-2 space-y-1">
+                      {msg.sources.map((source, idx) => (
+                        <li key={idx} className="flex items-start gap-2">
+                          <FileText className="w-4 h-4 mt-1 shrink-0" />
+                          <span>
+                            Page {source.payload.page_number}:{' '}
+                            {source.payload.text.substring(0, 100)}...
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="bg-white border-t p-4">
+        <form onSubmit={handleSubmit} className="max-w-3xl mx-auto">
+          <div className="flex gap-2">
             <input
               type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
+              value={query}
+              onChange={e => setQuery(e.target.value)}
               placeholder="Posez votre question..."
-              className="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              disabled={isLoading}
+              className="flex-1 rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              disabled={loading || !file}
             />
-            <button 
-              type="submit" 
-              className={`px-4 py-2 rounded-lg transition-colors ${
-                isLoading || !input.trim()
-                  ? 'bg-gray-300 cursor-not-allowed'
-                  : 'bg-blue-600 hover:bg-blue-700 text-white'
-              }`}
-              disabled={isLoading || !input.trim()}
+            <button
+              type="submit"
+              disabled={loading || !file || !query.trim()}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isLoading ? 'Envoi...' : 'Envoyer'}
+              <Send className="w-5 h-5" />
             </button>
-          </form>
-        </div>
+          </div>
+        </form>
       </div>
     </div>
   );
-}
+};
+
+export default App;
