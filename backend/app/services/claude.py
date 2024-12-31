@@ -29,36 +29,30 @@ class ClaudeService:
             str: La réponse de Claude
         """
         try:
-            messages = []
-
-            # Ajouter le prompt système par défaut si aucun n'est fourni
+            # Préparer le contenu du message
+            if context:
+                message_content = f"Context:\n{context}\n\nQuestion: {query}"
+            else:
+                message_content = query
+                
+            # Préparer les paramètres de la requête
+            params = {
+                "model": self.model,
+                "max_tokens": settings.MAX_TOKENS,
+                "temperature": settings.TEMPERATURE,
+                "messages": [
+                    {"role": "user", "content": message_content}
+                ]
+            }
+            
+            # Ajouter le prompt système si nécessaire
             if not system_prompt:
                 system_prompt = await self.get_default_system_prompt()
+            if system_prompt:
+                params["system"] = system_prompt
 
-            # Ajouter le prompt système
-            messages.append({
-                "role": "system",
-                "content": system_prompt
-            })
-
-            # Construire le message utilisateur avec contexte si disponible
-            user_content = query
-            if context:
-                user_content = f"Context:\n{context}\n\nQuestion: {query}"
-
-            messages.append({
-                "role": "user",
-                "content": user_content
-            })
-
-            # Appeler l'API Claude de manière synchrone
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=settings.MAX_TOKENS,
-                temperature=settings.TEMPERATURE,
-                messages=messages
-            )
-
+            # Appeler l'API Claude
+            response = self.client.messages.create(**params)
             return response.content[0].text
 
         except anthropic.APIError as e:
