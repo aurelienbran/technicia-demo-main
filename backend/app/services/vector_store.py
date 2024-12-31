@@ -4,6 +4,7 @@ from qdrant_client.http.models import Distance, VectorParams
 import logging
 from typing import List, Dict, Optional, Union
 from ..core.config import settings
+import numpy as np
 
 logger = logging.getLogger("technicia.vector_store")
 
@@ -14,6 +15,7 @@ class VectorStore:
             port=settings.QDRANT_PORT
         )
         self.collection_name = settings.COLLECTION_NAME
+        self._collection_counter = 0  # Compteur pour les IDs
         logger.info(f"Vector store initialized with collection: {self.collection_name}")
 
     async def init_collection(self) -> None:
@@ -26,15 +28,15 @@ class VectorStore:
             exists = any(col.name == self.collection_name for col in collections)
 
             if exists:
-                logger.info(f"Collection {self.collection_name} already exists")
-                return
+                logger.info(f"Collection {self.collection_name} already exists, recreating...")
+                self.client.delete_collection(self.collection_name)
 
             # Créer la collection avec la configuration appropriée
             self.client.create_collection(
                 collection_name=self.collection_name,
                 vectors_config=VectorParams(
                     size=settings.VECTOR_SIZE,
-                    distance=Distance.DOT  # Changement pour produit scalaire
+                    distance=Distance.DOT
                 )
             )
 
@@ -44,6 +46,9 @@ class VectorStore:
                 field_name="chunk_hash",
                 field_schema="keyword"
             )
+
+            # Réinitialiser le compteur
+            self._collection_counter = 0
 
             logger.info(f"Collection {self.collection_name} created successfully")
 
@@ -61,27 +66,32 @@ class VectorStore:
         Ajoute des vecteurs et leurs métadonnées à la collection.
         """
         try:
-            for i in range(0, len(vectors), batch_size):
-                batch_vectors = vectors[i:i + batch_size]
-                batch_payloads = payloads[i:i + batch_size]
+            points = []
+            for vector, payload in zip(vectors, payloads):
+                # Normaliser le vecteur
+                vector = np.array(vector)
+                norm = np.linalg.norm(vector)
+                vector = vector / norm
 
-                points = [
-                    models.PointStruct(
-                        id=idx + i,
-                        vector=vector.tolist() if hasattr(vector, 'tolist') else vector,
-                        payload=payload
-                    )
-                    for idx, (vector, payload) in enumerate(zip(batch_vectors, batch_payloads))
-                ]
+                # Créer le point
+                points.append(models.PointStruct(
+                    id=self._collection_counter,
+                    vector=vector.tolist(),
+                    payload=payload
+                ))
+                self._collection_counter += 1
 
-                # Affichage pour debug
-                logger.debug(f"Ajout d'un batch de {len(points)} points")
-                logger.debug(f"Premier vecteur du batch: {points[0].vector[:5]}...")
-                
-                self.client.upsert(
-                    collection_name=self.collection_name,
-                    points=points
-                )
+            # Logger les détails
+            logger.debug(f"Adding {len(points)} points to collection")
+            for point in points:
+                logger.debug(f"Point {point.id}: {len(point.vector)} dimensions, hash: {point.payload.get('chunk_hash')}")
+
+            # Ajouter les points
+            self.client.upsert(
+                collection_name=self.collection_name,
+                wait=True,  # Attendre que les points soient indexés
+                points=points
+            )
 
             logger.info(f"Successfully added {len(vectors)} vectors to collection")
 
@@ -100,57 +110,44 @@ class VectorStore:
         Recherche les documents les plus similaires.
         """
         try:
-            # Logging du vecteur de requête
-            logger.debug(f"Query vector preview: {query_vector[:5]}...")
-            
             # Vérifier que la collection existe
             info = await self.get_collection_info()
-            logger.info(f"Searching in collection with {info['points_count']} points")
+            points_count = info['points_count']
+            logger.info(f"Searching in collection with {points_count} points")
+            
+            if points_count == 0:
+                logger.warning("Collection is empty")
+                return []
 
-            # Traiter filter_conditions
-            final_filter = None
-            if filter_conditions:
-                final_filter = models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key=key,
-                            match=models.MatchValue(value=value)
-                        ) for key, value in filter_conditions.items()
-                    ]
-                )
+            # Normaliser le vecteur de requête
+            query_vector = np.array(query_vector)
+            query_vector = query_vector / np.linalg.norm(query_vector)
 
             # Recherche
             search_result = self.client.search(
                 collection_name=self.collection_name,
-                query_vector=query_vector,
+                query_vector=query_vector.tolist(),
                 limit=limit,
                 score_threshold=score_threshold,
-                query_filter=final_filter,
-                with_vectors=True  # Pour debug
+                with_payload=True,
+                with_vectors=True
             )
 
-            # Log les résultats
+            # Log détaillé des résultats
             if not search_result:
-                logger.warning("No results found")
+                logger.warning("No results found above threshold")
             else:
-                for idx, point in enumerate(search_result):
-                    logger.info(f"Result {idx + 1}: score={point.score:.4f}, id={point.id}")
-                    logger.debug(f"Vector preview: {point.vector[:5]}...")
-                    if hasattr(point, 'payload') and 'text' in point.payload:
-                        logger.debug(f"Text preview: {point.payload['text'][:100]}...")
+                for i, point in enumerate(search_result):
+                    logger.info(f"Result {i+1}: score={point.score:.4f}, text_length={len(point.payload.get('text', ''))}")
 
-            # Formater les résultats
-            results = [{
+            return [{
                 "score": point.score,
                 "payload": point.payload,
                 "id": point.id
             } for point in search_result]
 
-            return results
-
         except Exception as e:
             logger.error(f"Error searching vectors: {str(e)}")
-            logger.error(f"Exception details: {str(e.__class__.__name__)}: {str(e)}")
             raise
 
     async def search_by_hash(self, chunk_hash: str) -> List[Dict]:
@@ -158,7 +155,6 @@ class VectorStore:
         Recherche des documents par leur hash.
         """
         try:
-            filter_conditions = {"chunk_hash": chunk_hash}
             results = self.client.scroll(
                 collection_name=self.collection_name,
                 scroll_filter=models.Filter(
@@ -169,13 +165,15 @@ class VectorStore:
                         )
                     ]
                 ),
-                limit=1
+                limit=1,
+                with_payload=True
             )[0]
             
             return [{
                 "id": point.id,
                 "payload": point.payload
             } for point in results]
+
         except Exception as e:
             logger.error(f"Error searching by hash: {str(e)}")
             return []
@@ -206,7 +204,7 @@ class VectorStore:
                 "name": self.collection_name,
                 "status": "active",
                 "vector_size": settings.VECTOR_SIZE,
-                "points_count": 0 if info is None else getattr(info, 'points_count', 0)
+                "points_count": getattr(info, 'points_count', 0)
             }
         except Exception as e:
             logger.error(f"Error getting collection info: {str(e)}")
