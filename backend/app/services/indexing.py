@@ -32,6 +32,9 @@ class IndexingService:
             
             async for chunk, page_num in self._stream_pdf_chunks(file_path):
                 try:
+                    if not chunk.strip():  # Skip empty chunks
+                        continue
+
                     # Vérifier si le chunk est déjà indexé
                     chunk_hash = self._generate_hash(chunk)
                     if await self._is_chunk_indexed(chunk_hash):
@@ -124,34 +127,36 @@ class IndexingService:
         doc = None
         try:
             doc = fitz.open(file_path)
-            current_chunk = []
-            current_length = 0
+            text_buffer = ""
             
             for page_num in range(len(doc)):
                 page = doc[page_num]
-                # Extraction du texte par blocs pour une meilleure performance
-                blocks = page.get_text("blocks")
+                page_text = page.get_text()
                 
-                for block in blocks:
-                    words = block[4].split()  # Le texte est dans block[4]
+                if not page_text.strip():
+                    continue
                     
-                    for word in words:
-                        current_chunk.append(word)
-                        current_length += len(word) + 1
-                        
-                        if current_length >= self.chunk_size:
-                            chunk_text = " ".join(current_chunk)
-                            # Garder une partie pour le chevauchement
-                            overlap_words = current_chunk[-self.chunk_overlap:]
-                            current_chunk = overlap_words
-                            current_length = sum(len(word) + 1 for word in overlap_words)
-                            
-                            yield chunk_text, page_num + 1
+                text_buffer += page_text + " "
+                
+                # Process text_buffer into chunks
+                while len(text_buffer) >= self.chunk_size:
+                    # Find a good breakpoint
+                    breakpoint = text_buffer[:self.chunk_size].rfind(". ")
+                    if breakpoint == -1:
+                        breakpoint = text_buffer[:self.chunk_size].rfind(" ")
+                    if breakpoint == -1:
+                        breakpoint = self.chunk_size
+                    
+                    chunk = text_buffer[:breakpoint].strip()
+                    if chunk:  # Only yield non-empty chunks
+                        yield chunk, page_num + 1
+                    
+                    # Keep overlap for next chunk
+                    text_buffer = text_buffer[max(0, breakpoint - self.chunk_overlap):]
             
-            # Retourner le dernier chunk s'il en reste
-            if current_chunk:
-                chunk_text = " ".join(current_chunk)
-                yield chunk_text, page_num + 1
+            # Don't forget the last chunk
+            if text_buffer.strip():
+                yield text_buffer.strip(), page_num + 1
                 
         except Exception as e:
             logger.error(f"Error streaming PDF {file_path}: {str(e)}")
@@ -159,38 +164,6 @@ class IndexingService:
         finally:
             if doc:
                 doc.close()
-
-    async def index_directory(self, directory_path: str) -> List[Dict]:
-        """
-        Indexe tous les PDFs dans un répertoire de manière séquentielle avec gestion de la mémoire.
-        """
-        try:
-            pdf_files = list(Path(directory_path).glob("**/*.pdf"))
-            logger.info(f"Found {len(pdf_files)} PDF files in {directory_path}")
-
-            results = []
-            for pdf_file in pdf_files:
-                try:
-                    logger.info(f"Processing file: {pdf_file}")
-                    result = await self.index_document(str(pdf_file))
-                    results.append(result)
-                    # Délai entre les fichiers pour éviter la surcharge
-                    await asyncio.sleep(1)
-                except Exception as e:
-                    logger.error(f"Failed to index {pdf_file}: {str(e)}")
-                    results.append({
-                        "status": "error",
-                        "file": str(pdf_file),
-                        "error": str(e),
-                        "chunks_processed": 0,
-                        "metadata": {}
-                    })
-
-            return results
-
-        except Exception as e:
-            logger.error(f"Error indexing directory {directory_path}: {str(e)}")
-            raise
 
     @staticmethod
     def _generate_hash(text: str) -> str:
