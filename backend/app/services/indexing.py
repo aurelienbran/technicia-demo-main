@@ -27,71 +27,63 @@ class IndexingService:
         """
         Indexe un document PDF.
         """
+        doc = None
         try:
+            logger.info(f"Opening document: {file_path}")
             doc = fitz.open(file_path)
+            
+            # Extraire les métadonnées
             metadata = {
                 "filename": Path(file_path).name,
                 "title": doc.metadata.get("title", ""),
                 "author": doc.metadata.get("author", ""),
                 "doc_type": "pdf",
                 "page_count": len(doc),
-                "file_path": file_path,
+                "file_path": str(file_path),
             }
+            logger.info(f"Document metadata: {metadata}")
 
-            # Récupérer tout le texte du document
-            full_text = ""
-            for page in doc:
-                full_text += page.get_text() + "\n"
-            doc.close()
-
-            # Découper en chunks avec chevauchement
-            chunks = []
-            current_pos = 0
-            while current_pos < len(full_text):
-                # Trouver une bonne fin de chunk
-                end_pos = min(current_pos + self.chunk_size, len(full_text))
-                if end_pos < len(full_text):
-                    # Chercher la dernière phrase complète
-                    last_period = full_text.rfind(".", current_pos, end_pos)
-                    if last_period != -1:
-                        end_pos = last_period + 1
-
-                chunk = full_text[current_pos:end_pos].strip()
-                if chunk:  # Ignorer les chunks vides
-                    chunks.append(chunk)
-                current_pos = end_pos - self.chunk_overlap
-
-            # Indexer les chunks
+            # Traiter le document page par page
             chunks_processed = 0
-            for chunk in chunks:
+            for page_num in range(len(doc)):
                 try:
-                    chunk_hash = self._generate_hash(chunk)
-                    if chunk_hash in self._processed_chunks:
-                        continue
+                    page = doc[page_num]
+                    page_text = page.get_text()
+                    
+                    # Découper le texte en chunks
+                    text_chunks = self._split_text(page_text)
+                    logger.debug(f"Page {page_num + 1}: {len(text_chunks)} chunks")
+                    
+                    for chunk in text_chunks:
+                        if not chunk.strip():
+                            continue
+                            
+                        # Générer le hash et vérifier si déjà traité
+                        chunk_hash = self._generate_hash(chunk)
+                        if chunk_hash in self._processed_chunks:
+                            continue
 
-                    # Générer l'embedding
-                    embedding = await self.embedding.get_embedding(chunk)
-                    
-                    # Stocker dans Qdrant
-                    await self.vector_store.add_vectors(
-                        vectors=[embedding],
-                        payloads=[{
-                            **metadata,
-                            "chunk_index": chunks_processed,
-                            "text": chunk,
-                            "chunk_hash": chunk_hash,
-                            "indexed_at": datetime.utcnow().isoformat()
-                        }]
-                    )
-                    
-                    self._processed_chunks.add(chunk_hash)
-                    chunks_processed += 1
-                    
-                    # Rate limiting
-                    await asyncio.sleep(self.rate_limit_delay)
-                    
+                        # Générer l'embedding et stocker
+                        embedding = await self.embedding.get_embedding(chunk)
+                        await self.vector_store.add_vectors(
+                            vectors=[embedding],
+                            payloads=[{
+                                **metadata,
+                                "page_number": page_num + 1,
+                                "chunk_index": chunks_processed,
+                                "text": chunk,
+                                "chunk_hash": chunk_hash,
+                                "indexed_at": datetime.utcnow().isoformat()
+                            }]
+                        )
+                        
+                        self._processed_chunks.add(chunk_hash)
+                        chunks_processed += 1
+                        
+                        await asyncio.sleep(self.rate_limit_delay)
+                        
                 except Exception as e:
-                    logger.error(f"Error processing chunk {chunks_processed}: {str(e)}")
+                    logger.error(f"Error processing page {page_num + 1}: {str(e)}")
                     continue
 
             logger.info(f"Successfully indexed {file_path}: {chunks_processed} chunks processed")
@@ -104,12 +96,47 @@ class IndexingService:
 
         except Exception as e:
             logger.error(f"Error indexing document {file_path}: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             return {
                 "status": "error",
                 "file": file_path,
                 "error": str(e),
                 "chunks_processed": 0
             }
+        finally:
+            if doc:
+                doc.close()
+
+    def _split_text(self, text: str) -> List[str]:
+        """
+        Découpe un texte en chunks avec chevauchement.
+        """
+        chunks = []
+        current_pos = 0
+        text = text.strip()
+        
+        if not text:  # Ignorer les textes vides
+            return chunks
+
+        while current_pos < len(text):
+            # Trouver une bonne fin de chunk
+            end_pos = min(current_pos + self.chunk_size, len(text))
+            
+            if end_pos < len(text):
+                # Chercher la dernière phrase complète
+                last_period = text.rfind(".", current_pos, end_pos)
+                if last_period != -1:
+                    end_pos = last_period + 1
+
+            chunk = text[current_pos:end_pos].strip()
+            if chunk:  # Ignorer les chunks vides
+                chunks.append(chunk)
+            
+            # Avancer avec chevauchement
+            current_pos = max(current_pos + 1, end_pos - self.chunk_overlap)
+
+        return chunks
 
     @staticmethod
     def _generate_hash(text: str) -> str:
