@@ -41,7 +41,7 @@ class VectorStore:
             # Créer les index de payload
             self.client.create_payload_index(
                 collection_name=self.collection_name,
-                field_name="doc_type",
+                field_name="chunk_hash",
                 field_schema="keyword"
             )
 
@@ -131,6 +131,33 @@ class VectorStore:
         except Exception as e:
             logger.error(f"Error searching vectors: {str(e)}")
             raise
+
+    async def search_by_hash(self, chunk_hash: str) -> List[Dict]:
+        """
+        Recherche des documents par leur hash.
+        """
+        try:
+            filter_conditions = {"chunk_hash": chunk_hash}
+            results = self.client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="chunk_hash",
+                            match=models.MatchValue(value=chunk_hash)
+                        )
+                    ]
+                ),
+                limit=1
+            )[0]
+            
+            return [{
+                "id": point.id,
+                "payload": point.payload
+            } for point in results]
+        except Exception as e:
+            logger.error(f"Error searching by hash: {str(e)}")
+            return []
 
     async def delete_vectors(self, ids: Union[List[int], List[str]]) -> None:
         """
