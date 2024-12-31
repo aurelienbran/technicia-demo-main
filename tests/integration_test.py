@@ -113,16 +113,16 @@ async def run_tests():
         # Test des embeddings
         await test.test_embeddings()
         
-        # Test de l'indexation PDF (si un fichier est fourni)
-        test_pdf = project_root / "backend" / "docs" / "test.pdf"
-        if test_pdf.exists():
-            await test.test_pdf_indexing(str(test_pdf))
+        # Test de l'indexation PDF
+        pdf_path = os.path.join("docs", "em.pdf")
+        if os.path.exists(pdf_path):
+            await test.test_pdf_indexing(pdf_path)
             
             # Test de recherche
-            query = "Quel est le sujet principal de ce document?"
+            query = "Quels sont les éléments principaux abordés dans ce document?"
             await test.test_search_and_response(query)
         else:
-            logger.warning(f"⚠️ Fichier PDF de test non trouvé: {test_pdf}")
+            logger.warning(f"⚠️ Fichier PDF de test non trouvé: {pdf_path}")
         
         logger.info("🎉 Tous les tests ont réussi!")
         
@@ -131,10 +131,5 @@ async def run_tests():
         raise
 
 if __name__ == "__main__":
-    # Création des dossiers nécessaires
-    os.makedirs(str(project_root / "backend" / "docs"), exist_ok=True)
-    os.makedirs(str(project_root / "storage" / "pdfs"), exist_ok=True)
-    os.makedirs(str(project_root / "storage" / "index"), exist_ok=True)
-    
     # Exécution des tests
     asyncio.run(run_tests())
