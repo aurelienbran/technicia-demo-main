@@ -18,7 +18,7 @@ class ClaudeService:
         system_prompt: Optional[str] = None
     ) -> str:
         """
-        Obtient une réponse de Claude en utilisant l'API messages.
+        Obtient une réponse de Claude.
 
         Args:
             query: La question de l'utilisateur
@@ -31,12 +31,15 @@ class ClaudeService:
         try:
             messages = []
 
-            # Ajouter le prompt système si fourni
-            if system_prompt:
-                messages.append({
-                    "role": "system",
-                    "content": system_prompt
-                })
+            # Ajouter le prompt système par défaut si aucun n'est fourni
+            if not system_prompt:
+                system_prompt = await self.get_default_system_prompt()
+
+            # Ajouter le prompt système
+            messages.append({
+                "role": "system",
+                "content": system_prompt
+            })
 
             # Construire le message utilisateur avec contexte si disponible
             user_content = query
@@ -48,8 +51,8 @@ class ClaudeService:
                 "content": user_content
             })
 
-            # Appeler l'API Claude
-            response = await self.client.messages.create(
+            # Appeler l'API Claude de manière synchrone
+            response = self.client.messages.create(
                 model=self.model,
                 max_tokens=settings.MAX_TOKENS,
                 temperature=settings.TEMPERATURE,
@@ -69,20 +72,21 @@ class ClaudeService:
         """
         Retourne le prompt système par défaut pour TechnicIA.
         """
-        return """You are TechnicIA, an expert AI assistant specializing in technical documentation analysis and interpretation.
-Your role is to:
-1. Provide clear, accurate answers based on the technical documentation provided
+        return """
+You are TechnicIA, a professional AI assistant specialized in technical documentation analysis. Your role is to:
+1. Provide clear, accurate answers based on the technical content provided
 2. Help users understand complex technical concepts and procedures
-3. Be direct and concise in your responses while remaining thorough
+3. Stay focused on the context provided and be concise but thorough
 4. Acknowledge when specific information is not available in the provided context
 
-Always base your answers on the context provided. If no context is provided, clearly state that you need specific documentation to provide accurate information."""
+When given context from documents, base your answers entirely on that content. If no context is provided, clearly state that you need specific documentation to provide accurate information."""
 
     async def get_extraction_prompt(self) -> str:
         """
-        Retourne le prompt spécialisé pour l'extraction d'information des documents techniques.
+        Retourne le prompt spécialisé pour l'extraction d'information.
         """
-        return """Analyze the following technical document and extract the key information:
+        return """
+Analyze the following technical document and extract the key information:
 - Main technical concepts
 - Important procedures
 - Critical specifications
