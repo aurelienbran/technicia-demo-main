@@ -89,7 +89,7 @@ class VectorStore:
         self,
         query_vector: List[float],
         limit: int = 5,
-        score_threshold: float = 0.7,
+        score_threshold: float = 0.3,  # Seuil de similarité plus bas pour Voyage AI
         filter_conditions: Optional[Dict] = None
     ) -> List[Dict]:
         """
@@ -116,6 +116,12 @@ class VectorStore:
                 score_threshold=score_threshold,
                 query_filter=final_filter
             )
+
+            # Log les scores pour debugging
+            if not search_result:
+                logger.warning("No results found")
+            else:
+                logger.info(f"Found {len(search_result)} results with scores: {[r.score for r in search_result]}")
 
             results = []
             for scored_point in search_result:
