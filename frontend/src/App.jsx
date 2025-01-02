@@ -1,26 +1,30 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { FileText, Send, Upload } from 'lucide-react';
+import { FileText, Send, Upload, MessageSquare } from 'lucide-react';
 
 const API_URL = 'http://localhost:8000';
+
+const TypingIndicator = () => (
+  <div className="flex items-center space-x-2 p-4 bg-gray-100 rounded-lg max-w-[150px]">
+    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+  </div>
+);
 
 const App = () => {
   const [uploading, setUploading] = useState(false);
   const [messages, setMessages] = useState([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
-  
-  // Référence pour le conteneur de messages
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
 
-  // Fonction de scroll automatique
   const scrollToBottom = () => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   };
 
-  // Effet pour le scroll automatique quand les messages changent
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
@@ -33,7 +37,6 @@ const App = () => {
     }
 
     setUploading(true);
-
     const formData = new FormData();
     formData.append('file', file);
 
@@ -68,6 +71,7 @@ const App = () => {
 
     setLoading(true);
     setMessages(prev => [...prev, { type: 'user', content: query }]);
+    setQuery('');
 
     try {
       const response = await fetch(`${API_URL}/api/query`, {
@@ -89,7 +93,6 @@ const App = () => {
       }]);
     } finally {
       setLoading(false);
-      setQuery('');
     }
   };
 
@@ -97,7 +100,10 @@ const App = () => {
     <div className="flex flex-col h-screen bg-gray-100">
       <header className="bg-white shadow-sm p-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <h1 className="text-xl font-bold text-gray-800">TechnicIA Demo</h1>
+          <div className="flex items-center gap-2">
+            <MessageSquare className="w-6 h-6 text-blue-600" />
+            <h1 className="text-xl font-bold text-gray-800">TechnicIA Demo</h1>
+          </div>
           <div className="flex items-center gap-2">
             <label className="relative cursor-pointer">
               <input
@@ -157,7 +163,7 @@ const App = () => {
               )}
             </div>
           ))}
-          {/* Élément invisible pour le scroll automatique */}
+          {loading && <TypingIndicator />}
           <div ref={messagesEndRef} />
         </div>
       </div>
