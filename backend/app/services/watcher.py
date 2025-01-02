@@ -8,10 +8,11 @@ from typing import Optional
 logger = logging.getLogger("technicia.watcher")
 
 class PDFHandler(FileSystemEventHandler):
-    def __init__(self, indexing_service):
+    def __init__(self, indexing_service, loop=None):
         self.indexing_service = indexing_service
         self.processing_queue = asyncio.Queue()
         self._is_processing = False
+        self.loop = loop or asyncio.get_event_loop()
 
     async def process_pdf(self, pdf_path: str) -> None:
         """Traite un fichier PDF en utilisant le service d'indexation existant."""
@@ -38,21 +39,30 @@ class PDFHandler(FileSystemEventHandler):
         finally:
             self._is_processing = False
 
+    def handle_file(self, file_path: str) -> None:
+        """Méthode synchrone pour gérer l'ajout de fichiers à la queue."""
+        asyncio.run_coroutine_threadsafe(
+            self.processing_queue.put(file_path), 
+            self.loop
+        )
+        asyncio.run_coroutine_threadsafe(
+            self.process_queue(), 
+            self.loop
+        )
+
     def on_created(self, event):
         if event.is_directory or not event.src_path.lower().endswith('.pdf'):
             return
         
         logger.info(f"New PDF detected: {event.src_path}")
-        asyncio.create_task(self.processing_queue.put(event.src_path))
-        asyncio.create_task(self.process_queue())
+        self.handle_file(event.src_path)
 
     def on_modified(self, event):
         if event.is_directory or not event.src_path.lower().endswith('.pdf'):
             return
         
         logger.info(f"PDF modified: {event.src_path}")
-        asyncio.create_task(self.processing_queue.put(event.src_path))
-        asyncio.create_task(self.process_queue())
+        self.handle_file(event.src_path)
 
 class WatcherService:
     def __init__(self, docs_path: str, indexing_service):
@@ -60,6 +70,7 @@ class WatcherService:
         self.indexing_service = indexing_service
         self.observer: Optional[Observer] = None
         self.handler: Optional[PDFHandler] = None
+        self.loop = None
 
     async def start(self) -> None:
         """Démarre la surveillance du dossier docs/."""
@@ -67,8 +78,10 @@ class WatcherService:
             logger.warning("Observer already running")
             return
 
+        self.loop = asyncio.get_running_loop()
+        
         # Créer le handler et l'observer
-        self.handler = PDFHandler(self.indexing_service)
+        self.handler = PDFHandler(self.indexing_service, self.loop)
         self.observer = Observer()
         self.observer.schedule(self.handler, self.docs_path, recursive=False)
         
