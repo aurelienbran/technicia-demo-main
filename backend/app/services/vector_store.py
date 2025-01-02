@@ -1,6 +1,6 @@
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
-from qdrant_client.http.models import Distance, VectorParams
+from qdrant_client.http.models import Distance, VectorParams, Filter, FieldCondition, MatchValue
 import logging
 from typing import List, Dict, Optional, Union
 from ..core.config import settings
@@ -39,12 +39,18 @@ class VectorStore:
                     )
                 )
 
-                # Indexer le champ chunk_hash
+                # Indexer les champs importants
                 self.client.create_payload_index(
                     collection_name=self.collection_name,
                     field_name="chunk_hash",
                     field_schema="keyword"
                 )
+                self.client.create_payload_index(
+                    collection_name=self.collection_name,
+                    field_name="file_hash",
+                    field_schema="keyword"
+                )
+                
                 logger.info(f"Collection {self.collection_name} created successfully")
             else:
                 logger.info(f"Collection {self.collection_name} already exists")
@@ -53,40 +59,48 @@ class VectorStore:
             logger.error(f"Error ensuring collection exists: {str(e)}")
             raise
 
-    async def init_collection(self) -> None:
-        """Initialise ou réinitialise la collection."""
+    async def file_exists(self, file_hash: str) -> bool:
+        """Vérifie si un fichier avec le hash donné existe déjà."""
         try:
-            collections = self.client.get_collections().collections
-            exists = any(col.name == self.collection_name for col in collections)
-
-            if exists:
-                logger.info(f"Collection {self.collection_name} already exists, recreating...")
-                self.client.delete_collection(self.collection_name)
-
-            # Créer la collection
-            self.client.create_collection(
+            results = self.client.scroll(
                 collection_name=self.collection_name,
-                vectors_config=models.VectorParams(
-                    size=settings.VECTOR_SIZE,
-                    distance=Distance.COSINE  # Retour à COSINE pour Voyage AI
+                scroll_filter=Filter(
+                    must=[FieldCondition(
+                        key="file_hash",
+                        match=MatchValue(value=file_hash)
+                    )]
                 ),
-                optimizers_config=models.OptimizersConfigDiff(
-                    indexing_threshold=0  # Index immédiatement
-                )
-            )
-
-            # Indexer le champ chunk_hash
-            self.client.create_payload_index(
-                collection_name=self.collection_name,
-                field_name="chunk_hash",
-                field_schema="keyword"
-            )
-
-            self._collection_counter = 0
-            logger.info(f"Collection {self.collection_name} created successfully")
-
+                limit=1
+            )[0]
+            
+            return len(results) > 0
         except Exception as e:
-            logger.error(f"Error initializing collection: {str(e)}")
+            logger.error(f"Error checking file existence: {str(e)}")
+            return False
+
+    async def delete_file(self, file_hash: str) -> None:
+        """Supprime tous les points associés à un fichier."""
+        try:
+            points_to_delete = self.client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=Filter(
+                    must=[FieldCondition(
+                        key="file_hash",
+                        match=MatchValue(value=file_hash)
+                    )]
+                ),
+                with_payload=False
+            )[0]
+            
+            if points_to_delete:
+                point_ids = [point.id for point in points_to_delete]
+                self.client.delete(
+                    collection_name=self.collection_name,
+                    points_selector=models.PointIdsList(points=point_ids)
+                )
+                logger.info(f"Deleted {len(point_ids)} points for file hash {file_hash}")
+        except Exception as e:
+            logger.error(f"Error deleting file data: {str(e)}")
             raise
 
     async def add_vectors(
@@ -109,15 +123,16 @@ class VectorStore:
                 self._collection_counter += 1
 
             logger.debug(f"Adding {len(points)} points to collection")
-            logger.debug(f"First vector norm: {np.linalg.norm(points[0].vector)}")
+            if points:
+                logger.debug(f"First vector norm: {np.linalg.norm(points[0].vector)}")
 
-            self.client.upsert(
-                collection_name=self.collection_name,
-                wait=True,
-                points=points
-            )
+                self.client.upsert(
+                    collection_name=self.collection_name,
+                    wait=True,
+                    points=points
+                )
 
-            logger.info(f"Successfully added {len(vectors)} vectors to collection")
+                logger.info(f"Successfully added {len(vectors)} vectors to collection")
 
         except Exception as e:
             logger.error(f"Error adding vectors: {str(e)}")
@@ -127,7 +142,7 @@ class VectorStore:
         self,
         query_vector: List[float],
         limit: int = 5,
-        score_threshold: float = 0.0,  # Seuil basé sur la distance cosinus
+        score_threshold: float = 0.0,
         filter_conditions: Optional[Dict] = None
     ) -> List[Dict]:
         """Recherche les documents les plus similaires."""
@@ -142,69 +157,30 @@ class VectorStore:
 
             query_vector = np.array(query_vector, dtype=np.float32).tolist()
             
-            sample = np.array(query_vector[:5])
-            logger.debug(f"Query vector sample: {sample}, norm: {np.linalg.norm(query_vector)}")
-
-            top_k = min(limit * 2, points_count)
             search_result = self.client.search(
                 collection_name=self.collection_name,
                 query_vector=query_vector,
-                limit=top_k,
-                score_threshold=0.0,
+                limit=limit,
+                score_threshold=score_threshold,
                 with_payload=True
             )
 
             if not search_result:
                 logger.warning("No results found")
-            else:
-                for i, point in enumerate(search_result[:5]):
-                    logger.info(f"Result {i+1}: score={point.score:.4f}")
-                    if 'text' in point.payload:
-                        preview = point.payload['text'][:100] + '...'
-                        logger.debug(f"Text preview: {preview}")
+                return []
 
-            results = []
-            for point in search_result:
-                if point.score >= score_threshold:
-                    results.append({
-                        "score": float(point.score),
-                        "payload": point.payload,
-                        "id": point.id
-                    })
-                if len(results) >= limit:
-                    break
+            # Convertir les résultats
+            results = [{
+                "score": float(point.score),
+                "payload": point.payload,
+                "id": point.id
+            } for point in search_result]
 
             return results
 
         except Exception as e:
             logger.error(f"Error searching vectors: {str(e)}")
             raise
-
-    async def search_by_hash(self, chunk_hash: str) -> List[Dict]:
-        """Recherche des documents par leur hash."""
-        try:
-            results = self.client.scroll(
-                collection_name=self.collection_name,
-                scroll_filter=models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="chunk_hash",
-                            match=models.MatchValue(value=chunk_hash)
-                        )
-                    ]
-                ),
-                limit=1,
-                with_payload=True
-            )[0]
-            
-            return [{
-                "id": point.id,
-                "payload": point.payload
-            } for point in results]
-
-        except Exception as e:
-            logger.error(f"Error searching by hash: {str(e)}")
-            return []
 
     async def get_collection_info(self) -> Dict:
         """Récupère les informations sur la collection."""
