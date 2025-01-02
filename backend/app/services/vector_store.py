@@ -16,12 +16,10 @@ class VectorStore:
         )
         self.collection_name = settings.COLLECTION_NAME
         self._collection_counter = 0
-        # Initialiser la collection au démarrage
         self._ensure_collection_exists()
         logger.info(f"Vector store initialized with collection: {self.collection_name}")
 
     def _ensure_collection_exists(self) -> None:
-        """S'assure que la collection existe, la crée si nécessaire."""
         try:
             collections = self.client.get_collections().collections
             exists = any(col.name == self.collection_name for col in collections)
@@ -35,11 +33,11 @@ class VectorStore:
                         distance=Distance.COSINE
                     ),
                     optimizers_config=models.OptimizersConfigDiff(
-                        indexing_threshold=0
+                        indexing_threshold=0  # Index immédiatement
                     )
                 )
 
-                # Indexer les champs importants
+                # Indexation optimisée des champs
                 self.client.create_payload_index(
                     collection_name=self.collection_name,
                     field_name="chunk_hash",
@@ -49,6 +47,11 @@ class VectorStore:
                     collection_name=self.collection_name,
                     field_name="file_hash",
                     field_schema="keyword"
+                )
+                self.client.create_payload_index(
+                    collection_name=self.collection_name,
+                    field_name="text",
+                    field_schema="text"
                 )
                 
                 logger.info(f"Collection {self.collection_name} created successfully")
@@ -60,7 +63,6 @@ class VectorStore:
             raise
 
     async def file_exists(self, file_hash: str) -> bool:
-        """Vérifie si un fichier avec le hash donné existe déjà."""
         try:
             results = self.client.scroll(
                 collection_name=self.collection_name,
@@ -79,7 +81,6 @@ class VectorStore:
             return False
 
     async def delete_file(self, file_hash: str) -> None:
-        """Supprime tous les points associés à un fichier."""
         try:
             points_to_delete = self.client.scroll(
                 collection_name=self.collection_name,
@@ -109,12 +110,14 @@ class VectorStore:
         payloads: List[Dict],
         batch_size: int = 100
     ) -> None:
-        """Ajoute des vecteurs et leurs métadonnées à la collection."""
         try:
             points = []
             for vector, payload in zip(vectors, payloads):
                 vector = np.array(vector, dtype=np.float32)
-                # Les vecteurs Voyage AI sont déjà normalisés
+                # S'assurer que le texte est inclus dans le payload
+                if 'text' not in payload:
+                    logger.warning(f"Missing 'text' field in payload for point {self._collection_counter}")
+                
                 points.append(models.PointStruct(
                     id=self._collection_counter,
                     vector=vector.tolist(),
@@ -122,17 +125,17 @@ class VectorStore:
                 ))
                 self._collection_counter += 1
 
-            logger.debug(f"Adding {len(points)} points to collection")
-            if points:
-                logger.debug(f"First vector norm: {np.linalg.norm(points[0].vector)}")
-
+            # Batch processing pour de meilleures performances
+            for i in range(0, len(points), batch_size):
+                batch = points[i:i + batch_size]
                 self.client.upsert(
                     collection_name=self.collection_name,
                     wait=True,
-                    points=points
+                    points=batch
                 )
+                logger.debug(f"Added batch {i//batch_size + 1} of {(len(points)-1)//batch_size + 1}")
 
-                logger.info(f"Successfully added {len(vectors)} vectors to collection")
+            logger.info(f"Successfully added {len(vectors)} vectors to collection")
 
         except Exception as e:
             logger.error(f"Error adding vectors: {str(e)}")
@@ -142,10 +145,9 @@ class VectorStore:
         self,
         query_vector: List[float],
         limit: int = 5,
-        score_threshold: float = 0.0,
+        score_threshold: float = 0.7,  # Seuil de similarité plus élevé
         filter_conditions: Optional[Dict] = None
     ) -> List[Dict]:
-        """Recherche les documents les plus similaires."""
         try:
             info = await self.get_collection_info()
             points_count = info['points_count']
@@ -157,24 +159,51 @@ class VectorStore:
 
             query_vector = np.array(query_vector, dtype=np.float32).tolist()
             
+            # Construction du filtre de recherche
+            search_filter = None
+            if filter_conditions:
+                filter_must = []
+                for field, value in filter_conditions.items():
+                    filter_must.append(
+                        FieldCondition(key=field, match=MatchValue(value=value))
+                    )
+                search_filter = Filter(must=filter_must)
+            
+            # Recherche avec paramètres optimisés
             search_result = self.client.search(
                 collection_name=self.collection_name,
                 query_vector=query_vector,
                 limit=limit,
                 score_threshold=score_threshold,
-                with_payload=True
+                with_payload=True,
+                with_vectors=False,  # Pas besoin des vecteurs dans la réponse
+                search_params=models.SearchParams(
+                    hnsw_ef=128,  # Augmenter la précision de la recherche
+                    exact=False  # Mode approximatif pour la performance
+                ),
+                filter=search_filter
             )
 
             if not search_result:
                 logger.warning("No results found")
                 return []
 
-            # Convertir les résultats
-            results = [{
-                "score": float(point.score),
-                "payload": point.payload,
-                "id": point.id
-            } for point in search_result]
+            # Traitement et enrichissement des résultats
+            results = []
+            for point in search_result:
+                result = {
+                    "score": float(point.score),
+                    "payload": point.payload,
+                    "id": point.id
+                }
+                # Ajouter des informations supplémentaires si disponibles
+                if hasattr(point.payload, 'get'):
+                    result["text"] = point.payload.get("text", "")
+                    result["metadata"] = {
+                        k: v for k, v in point.payload.items()
+                        if k not in ["text", "chunk_hash", "file_hash"]
+                    }
+                results.append(result)
 
             return results
 
@@ -183,14 +212,14 @@ class VectorStore:
             raise
 
     async def get_collection_info(self) -> Dict:
-        """Récupère les informations sur la collection."""
         try:
             info = self.client.get_collection(self.collection_name)
             return {
                 "name": self.collection_name,
                 "status": "active",
                 "vector_size": settings.VECTOR_SIZE,
-                "points_count": getattr(info, 'points_count', 0)
+                "points_count": getattr(info, 'points_count', 0),
+                "indexed_percent": getattr(info, 'indexed_percent', 100)
             }
         except Exception as e:
             logger.error(f"Error getting collection info: {str(e)}")
