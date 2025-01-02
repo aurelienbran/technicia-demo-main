@@ -17,19 +17,7 @@ class ClaudeService:
         context: Optional[str] = None,
         system_prompt: Optional[str] = None
     ) -> str:
-        """
-        Obtient une réponse de Claude.
-
-        Args:
-            query: La question de l'utilisateur
-            context: Contexte optionnel (documents pertinents)
-            system_prompt: Prompt système optionnel pour guider Claude
-
-        Returns:
-            str: La réponse de Claude
-        """
         try:
-            # Préparer le contenu du message avec formatage
             if context:
                 message_content = f"""Context:
 {context}
@@ -46,7 +34,6 @@ Instructions de formatage:
             else:
                 message_content = f"{query}\n\nInstructions de formatage: Structurez votre réponse en sections claires et utilisez des paragraphes aérés pour une meilleure lisibilité."
                 
-            # Préparer les paramètres de la requête
             params = {
                 "model": self.model,
                 "max_tokens": settings.MAX_TOKENS,
@@ -56,13 +43,11 @@ Instructions de formatage:
                 ]
             }
             
-            # Ajouter le prompt système si nécessaire
             if not system_prompt:
                 system_prompt = await self.get_default_system_prompt()
             if system_prompt:
                 params["system"] = system_prompt
 
-            # Appeler l'API Claude
             response = self.client.messages.create(**params)
             return response.content[0].text
 
@@ -74,9 +59,6 @@ Instructions de formatage:
             raise
 
     async def get_default_system_prompt(self) -> str:
-        """
-        Retourne le prompt système par défaut pour TechnicIA.
-        """
         return """You are TechnicIA, a professional AI assistant specialized in technical documentation analysis. Your behavior should be:
 
 1. Direct and Solution-Focused
@@ -104,9 +86,6 @@ Instructions de formatage:
 - Acknowledge any limitations in the available information"""
 
     async def get_extraction_prompt(self) -> str:
-        """
-        Retourne le prompt spécialisé pour l'extraction d'information.
-        """
         return """Analyze the following technical document and extract the key information in clearly structured sections:
 
 ## Technical Overview
