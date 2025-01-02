@@ -37,9 +37,15 @@ class PDFHandler(FileSystemEventHandler):
         """Vérifie si le fichier a besoin d'être traité."""
         try:
             file_hash = self._get_file_hash(file_path)
-            # Vérifie dans Qdrant si le fichier a déjà été traité
-            results = await self.indexing_service.vector_store.search_by_hash(file_hash)
-            return len(results) == 0
+            # Vérifie dans Qdrant si le fichier existe déjà
+            exists = await self.indexing_service.vector_store.file_exists(file_hash)
+            
+            if exists:
+                logger.info(f"File {file_path} already indexed with hash {file_hash}")
+                return False
+            else:
+                logger.info(f"File {file_path} needs indexing with hash {file_hash}")
+                return True
         except Exception as e:
             logger.error(f"Error checking file status: {str(e)}")
             return True
