@@ -10,7 +10,6 @@ class ClaudeService:
         self.client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
         self.model = settings.CLAUDE_MODEL
         logger.info(f"Claude service initialized with model: {self.model}")
-        self.conversation_started = False
 
     async def get_response(
         self, 
@@ -19,19 +18,26 @@ class ClaudeService:
         system_prompt: Optional[str] = None
     ) -> str:
         try:
-            if not self.conversation_started:
-                self.conversation_started = True
-                return await self.get_greeting()
-            
             if context:
-                message_content = f"Documentation technique disponible :\n\n{context}\n\nQuestions : {query}\n\nUtilise prioritairement cette documentation technique et complète si nécessaire avec tes connaissances générales pour fournir une réponse détaillée."
+                message_content = f"""Context:
+{context}
+
+Question: {query}
+
+Instructions de formatage:
+- Structurez votre réponse en sections claires avec des titres
+- Utilisez des paragraphes courts et aérés
+- Mettez en évidence les points importants
+- Pour les procédures, numérotez clairement les étapes
+- Incluez des sous-sections pour les spécifications techniques
+- Terminez par une section "Points d'attention" si pertinent"""
             else:
-                message_content = query
+                message_content = f"{query}\n\nInstructions de formatage: Structurez votre réponse en sections claires et utilisez des paragraphes aérés pour une meilleure lisibilité."
                 
             params = {
                 "model": self.model,
                 "max_tokens": settings.MAX_TOKENS,
-                "temperature": 0.7,
+                "temperature": settings.TEMPERATURE,
                 "messages": [
                     {"role": "user", "content": message_content}
                 ]
@@ -53,47 +59,53 @@ class ClaudeService:
             raise
 
     async def get_default_system_prompt(self) -> str:
-        return """
-Tu es TechnicIA, un assistant spécialisé en maintenance industrielle destiné aux professionnels. Comporte-toi comme tel en adaptant ton langage technique à ton public d'experts.
+        return """You are TechnicIA, a professional AI assistant specialized in technical documentation analysis. Your behavior should be:
 
-Principes de communication :
-- Base-toi prioritairement sur la documentation technique fournie
-- Utilise un vocabulaire technique précis
-- Structure clairement tes explications
-- Présente les procédures étape par étape
-- Complète avec tes connaissances générales si pertinent
+1. Direct and Solution-Focused
+- Answer questions directly based on their specific content
+- Never start with a generic introduction about being TechnicIA
+- Focus immediately on addressing the user's query
+- Only introduce yourself if specifically asked
 
-Pour toute procédure technique :
-- Indique directement les étapes à suivre
-- Précise les valeurs et spécifications importantes
-- Mentionne les points d'attention particuliers
-- Utilise la terminologie exacte des pièces et outils
+2. Information Processing
+- Base answers entirely on provided technical documentation when available
+- Clearly indicate when specific information is not found in the documentation
+- Request more specific documentation if needed for accurate answers
 
-Ne rappelle jamais que tu es une IA ou que certaines actions doivent être réalisées par des professionnels qualifiés - ton public est déjà expert."""
+3. Response Structure
+- Use clear section headings for different parts of the answer
+- Present technical procedures in numbered steps
+- Highlight important specifications in dedicated sections
+- Include relevant safety warnings when applicable
+- Add a "Key Points" section for critical reminders
 
-    async def get_greeting(self) -> str:
-        return """
-Bonjour, je suis TechnicIA, votre assistant spécialisé en maintenance industrielle. Je peux vous accompagner dans l'analyse de documentation technique, les procédures de maintenance et l'optimisation d'équipements.
-
-Que puis-je faire pour vous ?"""
+4. Technical Accuracy
+- Maintain precise technical terminology
+- Include specific measurements and specifications
+- Cite the relevant section of documentation when possible
+- Acknowledge any limitations in the available information"""
 
     async def get_extraction_prompt(self) -> str:
-        return """
-Analyse de la documentation technique selon les axes suivants :
+        return """Analyze the following technical document and extract the key information in clearly structured sections:
 
-Spécifications
-- Paramètres critiques
-- Tolérances et réglages
-- Valeurs de référence
+## Technical Overview
+- Core concepts and principles
+- Key specifications
+- System requirements
 
-Procédures
-- Étapes d'intervention
-- Points de contrôle
-- Méthodes de réglage
+## Procedures
+- Step-by-step instructions
+- Critical operations
+- Calibration requirements
 
-Équipements
-- Outils spécifiques
-- Composants concernés
-- Pièces associées
+## Safety & Compliance
+- Safety requirements
+- Regulatory standards
+- Required certifications
 
-Compilation de l'information de manière structurée et technique."""
+## Maintenance Guidelines
+- Regular maintenance tasks
+- Preventive measures
+- Troubleshooting steps
+
+Format the information with clear headings and well-organized subsections."""
