@@ -7,6 +7,7 @@ from typing import Optional
 from queue import Queue
 from threading import Thread
 from asyncio import AbstractEventLoop
+import hashlib
 
 logger = logging.getLogger("technicia.watcher")
 
@@ -26,6 +27,23 @@ class PDFHandler(FileSystemEventHandler):
         self._processing_thread.daemon = True
         self._processing_thread.start()
 
+    def _get_file_hash(self, file_path: str) -> str:
+        """Calcule un hash unique pour le fichier basé sur son contenu et sa date de modification."""
+        file_stat = os.stat(file_path)
+        content = f"{file_path}_{file_stat.st_size}_{file_stat.st_mtime}"
+        return hashlib.md5(content.encode()).hexdigest()
+
+    async def _needs_processing(self, file_path: str) -> bool:
+        """Vérifie si le fichier a besoin d'être traité."""
+        try:
+            file_hash = self._get_file_hash(file_path)
+            # Vérifie dans Qdrant si le fichier a déjà été traité
+            results = await self.indexing_service.vector_store.search_by_hash(file_hash)
+            return len(results) == 0
+        except Exception as e:
+            logger.error(f"Error checking file status: {str(e)}")
+            return True
+
     def _process_queue_thread(self):
         """Thread de traitement des fichiers."""
         while not self._shutdown:
@@ -33,31 +51,40 @@ class PDFHandler(FileSystemEventHandler):
                 if not self._is_processing and not self.sync_queue.empty():
                     self._is_processing = True
                     pdf_path = self.sync_queue.get()
-                    logger.info(f"Processing file from queue: {pdf_path}")
+                    logger.info(f"Checking file: {pdf_path}")
                     
-                    # Utiliser run_coroutine_threadsafe pour appeler index_document
+                    # Vérifier si le fichier doit être traité
                     future = asyncio.run_coroutine_threadsafe(
-                        self.indexing_service.index_document(pdf_path),
+                        self._needs_processing(pdf_path),
                         self.loop
                     )
-                    
-                    try:
-                        result = future.result(timeout=60)  # Timeout de 60 secondes
-                        if result["status"] == "success":
-                            logger.info(f"Successfully indexed: {pdf_path}")
-                        else:
-                            logger.error(f"Failed to index {pdf_path}: {result.get('error', 'Unknown error')}")
-                    except Exception as e:
-                        logger.error(f"Error processing {pdf_path}: {str(e)}")
-                    finally:
-                        self._is_processing = False
-                        self.sync_queue.task_done()
+                    needs_processing = future.result(timeout=30)
+
+                    if needs_processing:
+                        logger.info(f"Processing file: {pdf_path}")
+                        future = asyncio.run_coroutine_threadsafe(
+                            self.indexing_service.index_document(pdf_path),
+                            self.loop
+                        )
+                        
+                        try:
+                            result = future.result(timeout=60)
+                            if result["status"] == "success":
+                                logger.info(f"Successfully indexed: {pdf_path}")
+                            else:
+                                logger.error(f"Failed to index {pdf_path}: {result.get('error', 'Unknown error')}")
+                        except Exception as e:
+                            logger.error(f"Error processing {pdf_path}: {str(e)}")
+                    else:
+                        logger.info(f"Skipping already indexed file: {pdf_path}")
+
+                    self._is_processing = False
+                    self.sync_queue.task_done()
 
             except Exception as e:
                 logger.error(f"Error in processing thread: {str(e)}")
                 self._is_processing = False
             
-            # Petite pause pour éviter de surcharger le CPU
             from time import sleep
             sleep(1)
 
@@ -95,7 +122,6 @@ class WatcherService:
             logger.warning("Observer already running")
             return
 
-        # Récupérer la boucle d'événements actuelle
         self.loop = asyncio.get_running_loop()
 
         # Créer le dossier s'il n'existe pas
@@ -122,7 +148,6 @@ class WatcherService:
                 if file.lower().endswith('.pdf'):
                     file_path = os.path.join(self.docs_path, file)
                     logger.info(f"Found existing PDF: {file_path}")
-                    # Utiliser la queue synchrone
                     self.handler.sync_queue.put(file_path)
         except Exception as e:
             logger.error(f"Error scanning existing files: {str(e)}")
