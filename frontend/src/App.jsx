@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { FileText, Send, Upload } from 'lucide-react';
 
 const API_URL = 'http://localhost:8000';
@@ -8,6 +8,22 @@ const App = () => {
   const [messages, setMessages] = useState([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
+  
+  // Référence pour le conteneur de messages
+  const messagesEndRef = useRef(null);
+  const chatContainerRef = useRef(null);
+
+  // Fonction de scroll automatique
+  const scrollToBottom = () => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
+  // Effet pour le scroll automatique quand les messages changent
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
@@ -100,7 +116,7 @@ const App = () => {
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 overflow-y-auto p-4" ref={chatContainerRef}>
         <div className="max-w-3xl mx-auto space-y-4">
           {messages.map((msg, idx) => (
             <div
@@ -141,6 +157,8 @@ const App = () => {
               )}
             </div>
           ))}
+          {/* Élément invisible pour le scroll automatique */}
+          <div ref={messagesEndRef} />
         </div>
       </div>
 
