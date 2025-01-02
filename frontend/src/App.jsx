@@ -4,11 +4,10 @@ import { FileText, Send, Upload } from 'lucide-react';
 const API_URL = 'http://localhost:8000';
 
 const App = () => {
-  const [file, setFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
   const [messages, setMessages] = useState([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
-  const [uploading, setUploading] = useState(false);
 
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
@@ -18,7 +17,6 @@ const App = () => {
     }
 
     setUploading(true);
-    setFile(file);
 
     const formData = new FormData();
     formData.append('file', file);
@@ -155,11 +153,11 @@ const App = () => {
               onChange={e => setQuery(e.target.value)}
               placeholder="Posez votre question..."
               className="flex-1 rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-              disabled={loading || !file}
+              disabled={loading}
             />
             <button
               type="submit"
-              disabled={loading || !file || !query.trim()}
+              disabled={loading || !query.trim()}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Send className="w-5 h-5" />
