@@ -21,7 +21,12 @@ class IndexingService:
         self.claude = ClaudeService()
         self.embedding = EmbeddingService()
         self.vector_store = VectorStore()
-        self._processed_hashes = set()
+
+    def _get_file_hash(self, file_path: str) -> str:
+        """Calcule un hash unique pour le fichier basé sur son contenu et sa date de modification."""
+        file_stat = os.stat(file_path)
+        content = f"{file_path}_{file_stat.st_size}_{file_stat.st_mtime}"
+        return hashlib.md5(content.encode()).hexdigest()
 
     async def index_document(self, file_path: str) -> Dict:
         try:
@@ -36,6 +41,9 @@ class IndexingService:
                 error_msg = f"No read permission for file: {file_path}"
                 logger.error(error_msg)
                 return {"status": "error", "error": error_msg}
+
+            # Calculer le hash du fichier
+            file_hash = self._get_file_hash(file_path)
 
             try:
                 # Lire le PDF
@@ -57,6 +65,7 @@ class IndexingService:
                     "doc_type": "pdf",
                     "page_count": len(doc),
                     "file_path": file_path,
+                    "file_hash": file_hash,  # Ajouter le hash aux métadonnées
                 }
 
                 # Extraire le texte
@@ -79,8 +88,6 @@ class IndexingService:
                 # Indexer les chunks
                 for i, (chunk, page_num) in enumerate(chunks):
                     chunk_hash = hashlib.md5(chunk.encode()).hexdigest()
-                    if chunk_hash in self._processed_hashes:
-                        continue
 
                     embedding = await self.embedding.get_embedding(chunk)
                     payload = {
@@ -89,6 +96,7 @@ class IndexingService:
                         "chunk_index": i,
                         "text": chunk,
                         "chunk_hash": chunk_hash,
+                        "file_hash": file_hash,  # Ajouter le hash du fichier à chaque chunk
                         "indexed_at": datetime.utcnow().isoformat()
                     }
 
@@ -97,7 +105,6 @@ class IndexingService:
                             vectors=[embedding],
                             payloads=[payload]
                         )
-                        self._processed_hashes.add(chunk_hash)
                     except Exception as e:
                         logger.error(f"Error adding chunk {i} to vector store: {str(e)}")
                         continue
