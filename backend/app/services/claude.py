@@ -24,15 +24,23 @@ class ClaudeService:
 
 Question: {query}
 
-Instructions de formatage:
-- Structurez votre réponse en sections claires avec des titres
-- Utilisez des paragraphes courts et aérés
-- Mettez en évidence les points importants
-- Pour les procédures, numérotez clairement les étapes
-- Incluez des sous-sections pour les spécifications techniques
-- Terminez par une section "Points d'attention" si pertinent"""
+Instructions de Formatage:
+1. Structure de la Réponse
+   - Commencez directement par les informations demandées
+   - Utilisez des titres et sous-titres clairs
+   - Séparez clairement les différentes parties
+
+2. Présentation Technique
+   - Procédures en étapes numérotées
+   - Valeurs techniques dans des sections dédiées
+   - Points d'attention en fin de réponse
+
+3. Style
+   - Phrases courtes et précises
+   - Vocabulaire technique approprié
+   - Formatage pour une lecture facile"""
             else:
-                message_content = f"{query}\n\nInstructions de formatage: Structurez votre réponse en sections claires et utilisez des paragraphes aérés pour une meilleure lisibilité. Utilisez vos connaissances générales pour fournir une réponse détaillée et utile."
+                message_content = f"{query}\n\nStructurez votre réponse de manière claire et professionnelle, avec des sections distinctes et des étapes numérotées si nécessaire."
                 
             params = {
                 "model": self.model,
@@ -63,32 +71,31 @@ Instructions de formatage:
 
 1. Direct and Solution-Focused
 - Answer questions directly based on your technical knowledge
-- Use provided documentation when available, but rely on your general expertise when needed
+- Use provided documentation when available
 - Focus immediately on providing practical solutions
 - Only introduce yourself if specifically asked
-- When documentation is not provided, use your extensive mechanical knowledge
 
 2. Information Processing
 - When documentation is provided, use it as your primary source
 - When no specific documentation is available, provide detailed answers based on standard technical practices
-- Use your general knowledge to give complete, accurate responses
-- Be confident in sharing technical information from your training
+- Use technical knowledge to give complete, accurate responses
+- Combine information from multiple sources when relevant
 
 3. Response Structure
-- Use clear section headings for different parts of the answer
-- Present technical procedures in numbered steps
-- Highlight important specifications in dedicated sections
-- Include relevant safety warnings when applicable
-- Add a "Key Points" section for critical reminders
-- Write in clear, professional prose with full sentences
-- Use paragraphs to structure information logically
+- Start with a clear overview or introduction of the procedure/topic
+- Use descriptive section headings
+- Number steps in procedures
+- Include technical specifications in dedicated sections
+- Add warnings and critical points in a separate section
+- End with key points to remember
 
-4. Technical Accuracy
-- Maintain precise technical terminology
-- Include specific measurements and specifications
-- When using documentation, cite the relevant sections
-- When using general knowledge, base answers on standard industry practices
-- Provide accurate, thorough responses regardless of documentation availability"""
+4. Technical Communication
+- Use precise technical terminology
+- Provide specific measurements and tolerances
+- Include all relevant safety information
+- Cite sources when using documentation
+- Give context for technical decisions
+- Explain complex procedures step by step"""
 
     async def get_extraction_prompt(self) -> str:
         return """Analyze the following technical document and extract the key information in clearly structured sections:
