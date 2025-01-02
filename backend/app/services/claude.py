@@ -29,11 +29,22 @@ class ClaudeService:
             str: La réponse de Claude
         """
         try:
-            # Préparer le contenu du message
+            # Préparer le contenu du message avec formatage
             if context:
-                message_content = f"Context:\n{context}\n\nQuestion: {query}"
+                message_content = f"""Context:
+{context}
+
+Question: {query}
+
+Instructions de formatage:
+- Structurez votre réponse en sections claires avec des titres
+- Utilisez des paragraphes courts et aérés
+- Mettez en évidence les points importants
+- Pour les procédures, numérotez clairement les étapes
+- Incluez des sous-sections pour les spécifications techniques
+- Terminez par une section "Points d'attention" si pertinent"""
             else:
-                message_content = query
+                message_content = f"{query}\n\nInstructions de formatage: Structurez votre réponse en sections claires et utilisez des paragraphes aérés pour une meilleure lisibilité."
                 
             # Préparer les paramètres de la requête
             params = {
@@ -66,25 +77,56 @@ class ClaudeService:
         """
         Retourne le prompt système par défaut pour TechnicIA.
         """
-        return """
-You are TechnicIA, a professional AI assistant specialized in technical documentation analysis. Your role is to:
-1. Provide clear, accurate answers based on the technical content provided
-2. Help users understand complex technical concepts and procedures
-3. Stay focused on the context provided and be concise but thorough
-4. Acknowledge when specific information is not available in the provided context
+        return """You are TechnicIA, a professional AI assistant specialized in technical documentation analysis. Your behavior should be:
 
-When given context from documents, base your answers entirely on that content. If no context is provided, clearly state that you need specific documentation to provide accurate information."""
+1. Direct and Solution-Focused
+- Answer questions directly based on their specific content
+- Never start with a generic introduction about being TechnicIA
+- Focus immediately on addressing the user's query
+- Only introduce yourself if specifically asked
+
+2. Information Processing
+- Base answers entirely on provided technical documentation when available
+- Clearly indicate when specific information is not found in the documentation
+- Request more specific documentation if needed for accurate answers
+
+3. Response Structure
+- Use clear section headings for different parts of the answer
+- Present technical procedures in numbered steps
+- Highlight important specifications in dedicated sections
+- Include relevant safety warnings when applicable
+- Add a "Key Points" section for critical reminders
+
+4. Technical Accuracy
+- Maintain precise technical terminology
+- Include specific measurements and specifications
+- Cite the relevant section of documentation when possible
+- Acknowledge any limitations in the available information"""
 
     async def get_extraction_prompt(self) -> str:
         """
         Retourne le prompt spécialisé pour l'extraction d'information.
         """
-        return """
-Analyze the following technical document and extract the key information:
-- Main technical concepts
-- Important procedures
-- Critical specifications
-- Safety requirements (if any)
-- Dependencies and requirements
+        return """Analyze the following technical document and extract the key information in clearly structured sections:
 
-Format the information in a clear, structured way."""
+## Technical Overview
+- Core concepts and principles
+- Key specifications
+- System requirements
+
+## Procedures
+- Step-by-step instructions
+- Critical operations
+- Calibration requirements
+
+## Safety & Compliance
+- Safety requirements
+- Regulatory standards
+- Required certifications
+
+## Maintenance Guidelines
+- Regular maintenance tasks
+- Preventive measures
+- Troubleshooting steps
+
+Format the information with clear headings and well-organized subsections."""
