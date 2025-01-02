@@ -1,42 +1,26 @@
 from pydantic_settings import BaseSettings
-from typing import Optional
 
 class Settings(BaseSettings):
     # API Keys
     ANTHROPIC_API_KEY: str
     VOYAGE_API_KEY: str
     
-    # Claude Configuration
+    # Modèle Claude
     CLAUDE_MODEL: str = "claude-3-opus-20240229"
-    MAX_TOKENS: int = 1024
+    MAX_TOKENS: int = 4096
     TEMPERATURE: float = 0.0
     
-    # Qdrant Configuration
+    # Configuration Qdrant
     QDRANT_HOST: str = "localhost"
     QDRANT_PORT: int = 6333
-    COLLECTION_NAME: str = "technical_docs"
-    VECTOR_SIZE: int = 1024  # Voyage AI dimension
+    COLLECTION_NAME: str = "technicia"
+    VECTOR_SIZE: int = 1024
     
-    # Chunking Configuration
-    CHUNK_SIZE: int = 1000
-    CHUNK_OVERLAP: int = 100
-    
-    # API Configuration
-    API_PORT: int = 8000
-    API_HOST: str = "0.0.0.0"
-    
-    # Logging
-    LOG_LEVEL: str = "INFO"
-    DEBUG: bool = False
-    
-    # Storage Configuration
-    STORAGE_PATH: str = "storage/pdfs"
-    INDEX_PATH: str = "storage/index"
+    # Paramètres d'indexation
+    CHUNK_SIZE: int = 1500  # Taille augmentée pour plus de contexte
+    CHUNK_OVERLAP: int = 300  # Chevauchement augmenté pour une meilleure continuité
     
     class Config:
         env_file = ".env"
-        case_sensitive = True
-        # Autoriser des champs supplémentaires dans le fichier .env
-        extra = "allow"
 
 settings = Settings()
