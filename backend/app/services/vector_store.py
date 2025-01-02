@@ -1,6 +1,6 @@
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
-from qdrant_client.http.models import Distance, VectorParams, Filter, FieldCondition, MatchValue
+from qdrant_client.http.models import Distance, VectorParams
 import logging
 from typing import List, Dict, Optional, Union
 from ..core.config import settings
@@ -33,21 +33,10 @@ class VectorStore:
                         distance=Distance.COSINE
                     ),
                     optimizers_config=models.OptimizersConfigDiff(
-                        indexing_threshold=0  # Index immédiatement
+                        indexing_threshold=0
                     )
                 )
 
-                # Indexation optimisée des champs
-                self.client.create_payload_index(
-                    collection_name=self.collection_name,
-                    field_name="chunk_hash",
-                    field_schema="keyword"
-                )
-                self.client.create_payload_index(
-                    collection_name=self.collection_name,
-                    field_name="file_hash",
-                    field_schema="keyword"
-                )
                 self.client.create_payload_index(
                     collection_name=self.collection_name,
                     field_name="text",
@@ -62,48 +51,6 @@ class VectorStore:
             logger.error(f"Error ensuring collection exists: {str(e)}")
             raise
 
-    async def file_exists(self, file_hash: str) -> bool:
-        try:
-            results = self.client.scroll(
-                collection_name=self.collection_name,
-                scroll_filter=Filter(
-                    must=[FieldCondition(
-                        key="file_hash",
-                        match=MatchValue(value=file_hash)
-                    )]
-                ),
-                limit=1
-            )[0]
-            
-            return len(results) > 0
-        except Exception as e:
-            logger.error(f"Error checking file existence: {str(e)}")
-            return False
-
-    async def delete_file(self, file_hash: str) -> None:
-        try:
-            points_to_delete = self.client.scroll(
-                collection_name=self.collection_name,
-                scroll_filter=Filter(
-                    must=[FieldCondition(
-                        key="file_hash",
-                        match=MatchValue(value=file_hash)
-                    )]
-                ),
-                with_payload=False
-            )[0]
-            
-            if points_to_delete:
-                point_ids = [point.id for point in points_to_delete]
-                self.client.delete(
-                    collection_name=self.collection_name,
-                    points_selector=models.PointIdsList(points=point_ids)
-                )
-                logger.info(f"Deleted {len(point_ids)} points for file hash {file_hash}")
-        except Exception as e:
-            logger.error(f"Error deleting file data: {str(e)}")
-            raise
-
     async def add_vectors(
         self,
         vectors: List[List[float]],
@@ -114,7 +61,6 @@ class VectorStore:
             points = []
             for vector, payload in zip(vectors, payloads):
                 vector = np.array(vector, dtype=np.float32)
-                # S'assurer que le texte est inclus dans le payload
                 if 'text' not in payload:
                     logger.warning(f"Missing 'text' field in payload for point {self._collection_counter}")
                 
@@ -125,7 +71,6 @@ class VectorStore:
                 ))
                 self._collection_counter += 1
 
-            # Batch processing pour de meilleures performances
             for i in range(0, len(points), batch_size):
                 batch = points[i:i + batch_size]
                 self.client.upsert(
@@ -145,8 +90,7 @@ class VectorStore:
         self,
         query_vector: List[float],
         limit: int = 5,
-        score_threshold: float = 0.7,  # Seuil de similarité plus élevé
-        filter_conditions: Optional[Dict] = None
+        score_threshold: float = 0.7
     ) -> List[Dict]:
         try:
             info = await self.get_collection_info()
@@ -159,36 +103,18 @@ class VectorStore:
 
             query_vector = np.array(query_vector, dtype=np.float32).tolist()
             
-            # Construction du filtre de recherche
-            search_filter = None
-            if filter_conditions:
-                filter_must = []
-                for field, value in filter_conditions.items():
-                    filter_must.append(
-                        FieldCondition(key=field, match=MatchValue(value=value))
-                    )
-                search_filter = Filter(must=filter_must)
-            
-            # Recherche avec paramètres optimisés
             search_result = self.client.search(
                 collection_name=self.collection_name,
                 query_vector=query_vector,
                 limit=limit,
                 score_threshold=score_threshold,
-                with_payload=True,
-                with_vectors=False,  # Pas besoin des vecteurs dans la réponse
-                search_params=models.SearchParams(
-                    hnsw_ef=128,  # Augmenter la précision de la recherche
-                    exact=False  # Mode approximatif pour la performance
-                ),
-                filter=search_filter
+                with_payload=True
             )
 
             if not search_result:
                 logger.warning("No results found")
                 return []
 
-            # Traitement et enrichissement des résultats
             results = []
             for point in search_result:
                 result = {
@@ -196,12 +122,11 @@ class VectorStore:
                     "payload": point.payload,
                     "id": point.id
                 }
-                # Ajouter des informations supplémentaires si disponibles
                 if hasattr(point.payload, 'get'):
                     result["text"] = point.payload.get("text", "")
                     result["metadata"] = {
                         k: v for k, v in point.payload.items()
-                        if k not in ["text", "chunk_hash", "file_hash"]
+                        if k not in ["text"]
                     }
                 results.append(result)
 
