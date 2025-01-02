@@ -16,12 +16,45 @@ class VectorStore:
         )
         self.collection_name = settings.COLLECTION_NAME
         self._collection_counter = 0
+        # Initialiser la collection au démarrage
+        self._ensure_collection_exists()
         logger.info(f"Vector store initialized with collection: {self.collection_name}")
 
+    def _ensure_collection_exists(self) -> None:
+        """S'assure que la collection existe, la crée si nécessaire."""
+        try:
+            collections = self.client.get_collections().collections
+            exists = any(col.name == self.collection_name for col in collections)
+
+            if not exists:
+                logger.info(f"Creating collection {self.collection_name}...")
+                self.client.create_collection(
+                    collection_name=self.collection_name,
+                    vectors_config=models.VectorParams(
+                        size=settings.VECTOR_SIZE,
+                        distance=Distance.COSINE
+                    ),
+                    optimizers_config=models.OptimizersConfigDiff(
+                        indexing_threshold=0
+                    )
+                )
+
+                # Indexer le champ chunk_hash
+                self.client.create_payload_index(
+                    collection_name=self.collection_name,
+                    field_name="chunk_hash",
+                    field_schema="keyword"
+                )
+                logger.info(f"Collection {self.collection_name} created successfully")
+            else:
+                logger.info(f"Collection {self.collection_name} already exists")
+
+        except Exception as e:
+            logger.error(f"Error ensuring collection exists: {str(e)}")
+            raise
+
     async def init_collection(self) -> None:
-        """
-        Initialise ou réinitialise la collection.
-        """
+        """Initialise ou réinitialise la collection."""
         try:
             collections = self.client.get_collections().collections
             exists = any(col.name == self.collection_name for col in collections)
@@ -62,9 +95,7 @@ class VectorStore:
         payloads: List[Dict],
         batch_size: int = 100
     ) -> None:
-        """
-        Ajoute des vecteurs et leurs métadonnées à la collection.
-        """
+        """Ajoute des vecteurs et leurs métadonnées à la collection."""
         try:
             points = []
             for vector, payload in zip(vectors, payloads):
@@ -99,11 +130,7 @@ class VectorStore:
         score_threshold: float = 0.0,  # Seuil basé sur la distance cosinus
         filter_conditions: Optional[Dict] = None
     ) -> List[Dict]:
-        """
-        Recherche les documents les plus similaires.
-        Les vecteurs Voyage AI étant déjà normalisés, nous utilisons directement
-        la similarité cosinus.
-        """
+        """Recherche les documents les plus similaires."""
         try:
             info = await self.get_collection_info()
             points_count = info['points_count']
@@ -113,34 +140,29 @@ class VectorStore:
                 logger.warning("Collection is empty")
                 return []
 
-            # Convertir en float32 pour cohérence
             query_vector = np.array(query_vector, dtype=np.float32).tolist()
             
-            # Debug
             sample = np.array(query_vector[:5])
             logger.debug(f"Query vector sample: {sample}, norm: {np.linalg.norm(query_vector)}")
 
-            # Effectuer la recherche avec un top-k plus large
-            top_k = min(limit * 2, points_count)  # Double le nombre de résultats
+            top_k = min(limit * 2, points_count)
             search_result = self.client.search(
                 collection_name=self.collection_name,
                 query_vector=query_vector,
-                limit=top_k,  # Récupère plus de résultats
-                score_threshold=0.0,  # Pas de seuil ici
+                limit=top_k,
+                score_threshold=0.0,
                 with_payload=True
             )
 
-            # Log des résultats
             if not search_result:
                 logger.warning("No results found")
             else:
-                for i, point in enumerate(search_result[:5]):  # Log top 5
+                for i, point in enumerate(search_result[:5]):
                     logger.info(f"Result {i+1}: score={point.score:.4f}")
                     if 'text' in point.payload:
                         preview = point.payload['text'][:100] + '...'
                         logger.debug(f"Text preview: {preview}")
 
-            # Filtre et tri des résultats
             results = []
             for point in search_result:
                 if point.score >= score_threshold:
@@ -159,9 +181,7 @@ class VectorStore:
             raise
 
     async def search_by_hash(self, chunk_hash: str) -> List[Dict]:
-        """
-        Recherche des documents par leur hash.
-        """
+        """Recherche des documents par leur hash."""
         try:
             results = self.client.scroll(
                 collection_name=self.collection_name,
@@ -187,9 +207,7 @@ class VectorStore:
             return []
 
     async def get_collection_info(self) -> Dict:
-        """
-        Récupère les informations sur la collection.
-        """
+        """Récupère les informations sur la collection."""
         try:
             info = self.client.get_collection(self.collection_name)
             return {
