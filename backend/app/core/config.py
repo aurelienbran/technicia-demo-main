@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     # Configuration Qdrant
     QDRANT_HOST: str = "localhost"
     QDRANT_PORT: int = 6333
-    COLLECTION_NAME: str = "technicia"
+    COLLECTION_NAME: str = "technical_docs"  # Mise à jour pour correspondre à l'existant
     VECTOR_SIZE: int = 1024
     
     # Paramètres d'indexation
@@ -33,6 +33,6 @@ class Settings(BaseSettings):
     
     class Config:
         env_file = ".env"
-        extra = "allow"  # Permet des champs supplémentaires dans le fichier .env
+        extra = "allow"
 
 settings = Settings()
