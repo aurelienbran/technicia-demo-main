@@ -136,60 +136,88 @@ class IndexingService:
             return []
 
         chunks = []
-        words = text.split()
+        sentences = text.replace('\n', ' ').split('.')
         current_chunk = []
         current_length = 0
 
-        for word in words:
-            current_chunk.append(word)
-            current_length += len(word) + 1
-
-            if current_length >= settings.CHUNK_SIZE:
-                chunk_text = " ".join(current_chunk)
-                chunks.append((chunk_text, page_num))
-                overlap_start = max(0, len(current_chunk) - settings.CHUNK_OVERLAP)
-                current_chunk = current_chunk[overlap_start:]
-                current_length = sum(len(w) + 1 for w in current_chunk)
+        for sentence in sentences:
+            sentence = sentence.strip() + '.'
+            sentence_length = len(sentence)
+            
+            if current_length + sentence_length > settings.CHUNK_SIZE and current_chunk:
+                chunks.append((' '.join(current_chunk), page_num))
+                current_chunk = []
+                current_length = 0
+            
+            if sentence_length > settings.CHUNK_SIZE:
+                # Diviser les phrases trop longues en mots
+                words = sentence.split()
+                temp_chunk = []
+                temp_length = 0
+                
+                for word in words:
+                    word_length = len(word) + 1
+                    if temp_length + word_length > settings.CHUNK_SIZE and temp_chunk:
+                        chunks.append((' '.join(temp_chunk), page_num))
+                        temp_chunk = []
+                        temp_length = 0
+                    
+                    temp_chunk.append(word)
+                    temp_length += word_length
+                
+                if temp_chunk:
+                    current_chunk.extend(temp_chunk)
+                    current_length += temp_length
+            else:
+                current_chunk.append(sentence)
+                current_length += sentence_length
 
         if current_chunk:
-            chunks.append((" ".join(current_chunk), page_num))
+            chunks.append((' '.join(current_chunk), page_num))
 
         return chunks
 
     async def search(self, query: str, limit: int = 5) -> Dict:
         try:
-            # Vérification de la connexion à la base vectorielle
+            # Vérification de la connexion
             try:
-                await self.vector_store.get_collection_info()
+                collection_info = await self.vector_store.get_collection_info()
+                if collection_info["points_count"] == 0:
+                    return {
+                        "answer": "Aucun document n'a encore été indexé dans la base de connaissances.",
+                        "sources": []
+                    }
             except Exception as e:
                 logger.error(f"Cannot connect to vector store: {str(e)}")
                 return {
-                    "answer": "Le service de recherche n'est pas disponible actuellement. Veuillez réessayer dans quelques instants.",
+                    "answer": "Le service de recherche n'est pas disponible actuellement.",
                     "sources": [],
                     "error": "Database connection error"
                 }
 
-            # Génération de l'embedding de la requête
+            # Génération de l'embedding avec plus de contexte
+            expanded_query = f"Technique automobile : {query}"
             try:
-                query_embedding = await self.embedding.get_embedding(query)
+                query_embedding = await self.embedding.get_embedding(expanded_query)
             except Exception as e:
                 logger.error(f"Error generating query embedding: {str(e)}")
                 return {
-                    "answer": "Une erreur s'est produite lors du traitement de votre requête. Veuillez réessayer.",
+                    "answer": "Une erreur s'est produite lors du traitement de votre requête.",
                     "sources": [],
                     "error": "Embedding generation error"
                 }
 
-            # Recherche dans la base vectorielle
+            # Recherche avec seuil de similarité ajusté
             try:
                 results = await self.vector_store.search(
                     query_vector=query_embedding,
-                    limit=limit
+                    limit=limit,
+                    score_threshold=0.5  # Seuil de similarité plus permissif
                 )
             except Exception as e:
                 logger.error(f"Error searching vector store: {str(e)}")
                 return {
-                    "answer": "Une erreur s'est produite lors de la recherche. Veuillez réessayer.",
+                    "answer": "Une erreur s'est produite lors de la recherche.",
                     "sources": [],
                     "error": "Search error"
                 }
@@ -197,36 +225,51 @@ class IndexingService:
             if not results:
                 logger.warning("No relevant results found for query")
                 return {
-                    "answer": "Je n'ai pas trouvé d'informations pertinentes dans la documentation disponible. Pourriez-vous reformuler votre question ou fournir plus de détails ?",
+                    "answer": "Je n'ai pas trouvé d'informations spécifiques sur ce sujet. Pouvez-vous préciser votre question ou donner plus de détails sur le modèle exact du véhicule ?",
                     "sources": []
                 }
 
-            # Préparation du contexte pour Claude
-            context = "\n---\n".join(
-                f"[Page {result['payload'].get('page_number', 'N/A')}] {result['payload'].get('text', '')}"
-                for result in results
-                if 'payload' in result and 'text' in result['payload']
-            )
+            # Préparation du contexte enrichi pour Claude
+            context_parts = []
+            for result in results:
+                if 'payload' in result and 'text' in result['payload']:
+                    text = result['payload']['text']
+                    page = result['payload'].get('page_number', 'N/A')
+                    score = result['score']
+                    if score > 0.7:  # Contenu très pertinent
+                        context_parts.append(f"[Information principale - Page {page}]\n{text}")
+                    else:  # Contenu potentiellement pertinent
+                        context_parts.append(f"[Information complémentaire - Page {page}]\n{text}")
+
+            context = "\n\n".join(context_parts)
 
             if not context:
                 logger.warning("No valid context extracted from results")
                 return {
-                    "answer": "Une erreur s'est produite lors de la préparation des résultats. Veuillez réessayer.",
+                    "answer": "Une erreur s'est produite lors de la préparation des résultats.",
                     "sources": [],
                     "error": "Context preparation error"
                 }
 
-            # Génération de la réponse avec Claude
+            # Génération de la réponse avec Claude avec un prompt enrichi
             try:
-                prompt = (
-                    f"En te basant sur ce contenu technique, réponds à cette question de manière détaillée et structurée : {query}\n\n"
-                    f"Contenu de référence :\n{context}"
-                )
+                prompt = f"""En tant qu'expert en mécanique automobile, réponds à cette question technique de manière détaillée et structurée : {query}
+
+Voici les informations techniques pertinentes trouvées dans la documentation :
+
+{context}
+
+Structure ta réponse avec :
+1. Une présentation claire de la procédure
+2. Les spécifications techniques importantes
+3. Les points d'attention particuliers
+4. Si nécessaire, des recommandations de sécurité"""
+                
                 answer = await self.claude.get_response(prompt)
             except Exception as e:
                 logger.error(f"Error generating response with Claude: {str(e)}")
                 return {
-                    "answer": "Une erreur s'est produite lors de la génération de la réponse. Veuillez réessayer.",
+                    "answer": "Une erreur s'est produite lors de la génération de la réponse.",
                     "sources": results,
                     "error": "Response generation error"
                 }
@@ -239,7 +282,7 @@ class IndexingService:
         except Exception as e:
             logger.error(f"Unexpected error in search process: {str(e)}")
             return {
-                "answer": "Une erreur inattendue s'est produite. Nos équipes ont été notifiées du problème.",
+                "answer": "Une erreur inattendue s'est produite.",
                 "sources": [],
                 "error": f"Unexpected error: {str(e)}"
             }
