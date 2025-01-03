@@ -16,6 +16,7 @@ class IndexingService:
         self.vector_store = VectorStore()
         self.chunk_size = 1500
         self.chunk_overlap = 300
+        self._hashes = {}
 
     def _get_file_hash(self, file_path: str) -> str:
         try:
@@ -56,41 +57,39 @@ class IndexingService:
 
     async def index_document(self, file_path: str) -> Dict:
         try:
-            file_hash = self._get_file_hash(file_path)
-            exists = await self.vector_store.file_exists(file_path)
+            current_hash = self._get_file_hash(file_path)
             
-            if exists:
+            if file_path in self._hashes and self._hashes[file_path] == current_hash:
                 logger.info(f"File {file_path} already indexed")
                 return {"status": "success", "file": file_path, "message": "File already indexed"}
 
             chunks = self._extract_text_from_pdf(file_path)
             if not chunks:
-                logger.warning(f"No text extracted from {file_path}")
                 return {"status": "error", "file": file_path, "error": "No text extracted"}
 
             texts = [chunk["text"] for chunk in chunks]
             embeddings = await self.embedding_service.get_embeddings(texts)
 
             if not embeddings:
-                logger.error(f"Failed to generate embeddings for {file_path}")
                 return {"status": "error", "file": file_path, "error": "Failed to generate embeddings"}
 
+            await self.vector_store.clear_file(file_path)  # Remove old vectors if they exist
+            
             metadatas = [
                 {
                     "file_path": file_path,
                     "page": chunk["page"],
                     "chunk_index": chunk["chunk_index"],
-                    "chunk_id": f"{file_hash}_{chunk['chunk_index']}"
+                    "hash": current_hash
                 }
                 for chunk in chunks
             ]
 
             success = await self.vector_store.add_texts(texts, metadatas, embeddings)
             if not success:
-                logger.error(f"Failed to add vectors for {file_path}")
                 return {"status": "error", "file": file_path, "error": "Failed to add to vector store"}
 
-            logger.info(f"Successfully indexed {file_path}")
+            self._hashes[file_path] = current_hash
             return {
                 "status": "success",
                 "file": file_path,
@@ -116,6 +115,7 @@ class IndexingService:
                 }
 
             context = "\n\n---\n\n".join([text[0]["text"] for text in similar_texts])
+            
             prompt = f"Question: {query}\n\nContexte: {context}\n\nRépondez à la question en vous basant uniquement sur le contexte fourni. Si vous ne trouvez pas l'information dans le contexte, dites-le clairement."
             
             answer = await self.claude.generate_response(prompt)
