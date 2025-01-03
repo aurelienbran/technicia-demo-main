@@ -24,7 +24,7 @@ class VectorStore:
         else:
             logger.info(f"Collection {self.collection_name} exists")
 
-    def file_exists(self, file_path: str) -> bool:
+    async def file_exists(self, file_path: str) -> bool:
         try:
             result = self.client.scroll(
                 collection_name=self.collection_name,
