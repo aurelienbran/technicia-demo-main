@@ -2,6 +2,7 @@ import logging
 from qdrant_client import QdrantClient, models
 from qdrant_client.http import models as rest
 from qdrant_client.http.models import Distance, VectorParams
+import random
 
 logger = logging.getLogger("technicia.vector_store")
 
@@ -43,26 +44,13 @@ class VectorStore:
             logger.error(f"Error checking file existence: {e}")
             return False
 
-    async def get_collection_info(self):
-        try:
-            collection = self.client.get_collection(self.collection_name)
-            return {
-                "name": self.collection_name,
-                "status": "active",
-                "vector_size": collection.config.params.vector_size,
-                "points_count": collection.points_count,
-                "indexed_percent": 100
-            }
-        except Exception as e:
-            logger.error(f"Error getting collection info: {e}")
-            raise
-
     async def add_texts(self, texts, metadatas, embeddings):
         try:
             points = []
             for i, (text, metadata, embedding) in enumerate(zip(texts, metadatas, embeddings)):
+                point_id = int(random.randint(1, 2**31-1))  # Generate numeric ID
                 points.append(models.PointStruct(
-                    id=metadata.get('chunk_id', f"point_{i}"),
+                    id=point_id,
                     payload={
                         "text": text,
                         "file_path": metadata.get("file_path", ""),
