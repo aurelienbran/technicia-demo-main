@@ -53,7 +53,7 @@ const App = () => {
           content: `Document ${file.name} indexé avec succès`
         }]);
       } else {
-        throw new Error(result.error);
+        throw new Error(result.error || 'Une erreur est survenue lors de l\'indexation');
       }
     } catch (error) {
       setMessages(prev => [...prev, {
@@ -69,24 +69,40 @@ const App = () => {
     e.preventDefault();
     if (!query.trim()) return;
 
+    const userMessage = query.trim();
     setLoading(true);
-    setMessages(prev => [...prev, { type: 'user', content: query }]);
+    setMessages(prev => [...prev, { type: 'user', content: userMessage }]);
     setQuery('');
 
     try {
       const response = await fetch(`${API_URL}/api/query`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query })
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({ 
+          query: userMessage,
+          limit: 5
+        })
       });
       
+      if (!response.ok) {
+        throw new Error(`Erreur serveur: ${response.status}`);
+      }
+
       const result = await response.json();
+      if (!result.answer) {
+        throw new Error('Réponse invalide du serveur');
+      }
+
       setMessages(prev => [...prev, { 
         type: 'assistant',
         content: result.answer,
-        sources: result.sources
+        sources: result.sources || []
       }]);
     } catch (error) {
+      console.error('Error in query:', error);
       setMessages(prev => [...prev, {
         type: 'error',
         content: `Erreur: ${error.message}`
@@ -148,12 +164,12 @@ const App = () => {
                       Sources ({msg.sources.length})
                     </summary>
                     <ul className="mt-2 space-y-1">
-                      {msg.sources.map((source, idx) => (
-                        <li key={idx} className="flex items-start gap-2">
+                      {msg.sources.map((source, sourceIdx) => (
+                        <li key={sourceIdx} className="flex items-start gap-2">
                           <FileText className="w-4 h-4 mt-1 shrink-0" />
                           <span>
-                            Page {source.payload.page_number}:{' '}
-                            {source.payload.text.substring(0, 100)}...
+                            {source.payload.page_number && `Page ${source.payload.page_number}: `}
+                            {(source.payload.text || '').substring(0, 100)}...
                           </span>
                         </li>
                       ))}
