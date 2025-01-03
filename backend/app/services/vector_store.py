@@ -25,37 +25,36 @@ class VectorStore:
         else:
             logger.info(f"Collection {self.collection_name} exists")
 
-    async def file_exists(self, file_path: str) -> bool:
+    async def clear_file(self, file_path: str) -> None:
         try:
-            result = self.client.scroll(
+            self.client.delete(
                 collection_name=self.collection_name,
-                scroll_filter=models.Filter(
+                points_selector=models.Filter(
                     must=[
                         models.FieldCondition(
                             key="file_path",
                             match=models.MatchValue(value=file_path)
                         )
                     ]
-                ),
-                limit=1
+                )
             )
-            return bool(result[0])
         except Exception as e:
-            logger.error(f"Error checking file existence: {e}")
-            return False
+            logger.error(f"Error clearing file vectors: {e}")
+            raise
 
     async def add_texts(self, texts, metadatas, embeddings):
         try:
             points = []
             for i, (text, metadata, embedding) in enumerate(zip(texts, metadatas, embeddings)):
-                point_id = int(random.randint(1, 2**31-1))  # Generate numeric ID
+                point_id = random.randint(1, 2**31-1)
                 points.append(models.PointStruct(
                     id=point_id,
                     payload={
                         "text": text,
                         "file_path": metadata.get("file_path", ""),
                         "page": metadata.get("page", 0),
-                        "chunk_index": metadata.get("chunk_index", 0)
+                        "chunk_index": metadata.get("chunk_index", 0),
+                        "hash": metadata.get("hash", "")
                     },
                     vector=embedding
                 ))
