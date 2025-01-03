@@ -56,18 +56,25 @@ class IndexingService:
 
     async def index_document(self, file_path: str) -> Dict:
         try:
-            if self.vector_store.file_exists(file_path):
+            file_hash = self._get_file_hash(file_path)
+            exists = await self.vector_store.file_exists(file_path)
+            
+            if exists:
                 logger.info(f"File {file_path} already indexed")
                 return {"status": "success", "file": file_path, "message": "File already indexed"}
 
             chunks = self._extract_text_from_pdf(file_path)
             if not chunks:
+                logger.warning(f"No text extracted from {file_path}")
                 return {"status": "error", "file": file_path, "error": "No text extracted"}
 
             texts = [chunk["text"] for chunk in chunks]
             embeddings = await self.embedding_service.get_embeddings(texts)
 
-            file_hash = self._get_file_hash(file_path)
+            if not embeddings:
+                logger.error(f"Failed to generate embeddings for {file_path}")
+                return {"status": "error", "file": file_path, "error": "Failed to generate embeddings"}
+
             metadatas = [
                 {
                     "file_path": file_path,
@@ -80,8 +87,10 @@ class IndexingService:
 
             success = await self.vector_store.add_texts(texts, metadatas, embeddings)
             if not success:
+                logger.error(f"Failed to add vectors for {file_path}")
                 return {"status": "error", "file": file_path, "error": "Failed to add to vector store"}
 
+            logger.info(f"Successfully indexed {file_path}")
             return {
                 "status": "success",
                 "file": file_path,
@@ -95,24 +104,18 @@ class IndexingService:
 
     async def search(self, query: str, limit: int = 5) -> Dict:
         try:
-            # Obtenir l'embedding de la requête
             query_embedding = await self.embedding_service.get_embeddings([query])
             if not query_embedding:
                 raise Exception("Failed to generate query embedding")
 
-            # Rechercher les documents similaires
             similar_texts = await self.vector_store.similarity_search(query_embedding[0], k=limit)
             if not similar_texts:
-                # Retourner une réponse par défaut si aucun document n'est trouvé
                 return {
                     "answer": "Je suis désolé, je n'ai pas trouvé d'information pertinente dans la documentation disponible.",
                     "sources": []
                 }
 
-            # Préparer le contexte pour Claude
             context = "\n\n---\n\n".join([text[0]["text"] for text in similar_texts])
-            
-            # Obtenir la réponse de Claude
             prompt = f"Question: {query}\n\nContexte: {context}\n\nRépondez à la question en vous basant uniquement sur le contexte fourni. Si vous ne trouvez pas l'information dans le contexte, dites-le clairement."
             
             answer = await self.claude.generate_response(prompt)
