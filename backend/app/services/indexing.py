@@ -1,150 +1,131 @@
 import logging
-import asyncio
-from typing import List, Dict
-from datetime import datetime
-from pathlib import Path
 import hashlib
-import fitz
-import numpy as np
-from fitz.fitz import FileDataError
 import os
-
+from typing import List, Dict, Optional
 from .claude import ClaudeService
 from .embedding import EmbeddingService
 from .vector_store import VectorStore
-from .image_processing import ImageProcessor
-from ..core.config import settings
+import fitz
 
 logger = logging.getLogger("technicia.indexing")
 
 class IndexingService:
     def __init__(self):
         self.claude = ClaudeService()
-        self.embedding = EmbeddingService()
+        self.embedding_service = EmbeddingService()
         self.vector_store = VectorStore()
-        self.image_processor = ImageProcessor()
+        self.chunk_size = 1500
+        self.chunk_overlap = 300
+
+    def _get_file_hash(self, file_path: str) -> str:
+        try:
+            file_stat = os.stat(file_path)
+            file_info = f"{file_path}|{file_stat.st_size}|{file_stat.st_mtime}"
+            return hashlib.sha256(file_info.encode()).hexdigest()
+        except Exception as e:
+            logger.error(f"Error generating file hash: {e}")
+            raise
+
+    def _extract_text_from_pdf(self, file_path: str) -> List[Dict[str, any]]:
+        try:
+            doc = fitz.open(file_path)
+            text_chunks = []
+            
+            for page_num in range(len(doc)):
+                page = doc[page_num]
+                text = page.get_text()
+                
+                if not text.strip():
+                    continue
+                
+                start = 0
+                while start < len(text):
+                    chunk = text[start:start + self.chunk_size]
+                    if len(chunk.strip()) > 0:
+                        text_chunks.append({
+                            "text": chunk,
+                            "page": page_num + 1,
+                            "chunk_index": len(text_chunks)
+                        })
+                    start += self.chunk_size - self.chunk_overlap
+            
+            return text_chunks
+        except Exception as e:
+            logger.error(f"Error extracting text from PDF: {e}")
+            raise
 
     async def index_document(self, file_path: str) -> Dict:
         try:
-            if not os.path.exists(file_path):
-                error_msg = f"File not found: {file_path}"
-                logger.error(error_msg)
-                return {"status": "error", "error": error_msg}
+            if self.vector_store.file_exists(file_path):
+                logger.info(f"File {file_path} already indexed")
+                return {"status": "success", "file": file_path, "message": "File already indexed"}
+
+            chunks = self._extract_text_from_pdf(file_path)
+            if not chunks:
+                return {"status": "error", "file": file_path, "error": "No text extracted"}
+
+            texts = [chunk["text"] for chunk in chunks]
+            embeddings = await self.embedding_service.get_embeddings(texts)
 
             file_hash = self._get_file_hash(file_path)
-            doc = None
-
-            try:
-                doc = fitz.open(file_path)
-                metadata = self._get_document_metadata(doc, file_path, file_hash)
-                
-                # Traitement parallèle du texte et des images
-                text_chunks = []
-                image_chunks = []
-
-                for page_num in range(len(doc)):
-                    page = doc[page_num]
-                    
-                    # Extraction du texte
-                    text = page.get_text()
-                    if text.strip():
-                        text_chunks.extend(self._split_text(text, page_num + 1))
-                    
-                    # Extraction et traitement des images
-                    images = await self.image_processor.extract_images_from_pdf(page)
-                    for img_data in images:
-                        image_context = self._prepare_image_context(
-                            img_data, metadata, page_num + 1
-                        )
-                        image_chunks.append(image_context)
-
-                logger.info(f"Extracted {len(text_chunks)} text chunks and {len(image_chunks)} images from {file_path}")
-
-                if not text_chunks and not image_chunks:
-                    return {"status": "error", "error": "No content found in document"}
-
-                # Indexation du texte
-                await self._index_text_chunks(text_chunks, metadata)
-
-                # Indexation des images
-                await self._index_image_chunks(image_chunks, metadata)
-
-                return {
-                    "status": "success",
-                    "file": file_path,
-                    "text_chunks": len(text_chunks),
-                    "image_chunks": len(image_chunks)
+            metadatas = [
+                {
+                    "file_path": file_path,
+                    "page": chunk["page"],
+                    "chunk_index": chunk["chunk_index"],
+                    "chunk_id": f"{file_hash}_{chunk['chunk_index']}"
                 }
+                for chunk in chunks
+            ]
 
-            except Exception as e:
-                logger.error(f"Error processing document: {str(e)}")
-                return {"status": "error", "error": str(e)}
-            finally:
-                if doc:
-                    doc.close()
+            success = await self.vector_store.add_texts(texts, metadatas, embeddings)
+            if not success:
+                return {"status": "error", "file": file_path, "error": "Failed to add to vector store"}
+
+            return {
+                "status": "success",
+                "file": file_path,
+                "chunks_processed": len(chunks),
+                "metadata": {"pages": len(set(chunk["page"] for chunk in chunks))}
+            }
 
         except Exception as e:
-            logger.error(f"Unexpected error: {str(e)}")
-            return {"status": "error", "error": str(e)}
+            logger.error(f"Error indexing document: {e}")
+            return {"status": "error", "file": file_path, "error": str(e)}
 
-    def _prepare_image_context(self, img_data: Dict, metadata: Dict, page_num: int) -> Dict:
-        """Prépare le contexte d'une image pour l'indexation."""
-        context_text = f"Type: {img_data['type']}\n"
-        if img_data['context']:
-            context_text += f"Context: {img_data['context']}\n"
-        context_text += f"Location: Page {page_num}, Position: {img_data['position']}"
+    async def search(self, query: str, limit: int = 5) -> Dict:
+        try:
+            # Obtenir l'embedding de la requête
+            query_embedding = await self.embedding_service.get_embeddings([query])
+            if not query_embedding:
+                raise Exception("Failed to generate query embedding")
 
-        return {
-            **metadata,
-            "page_number": page_num,
-            "content_type": "image",
-            "image_type": img_data['type'],
-            "text": context_text,
-            "image_data": img_data['image_data'],
-            "position": img_data['position']
-        }
-
-    async def _index_text_chunks(self, chunks: List[tuple[str, int]], metadata: Dict):
-        """Indexe les chunks de texte."""
-        for i, (chunk, page_num) in enumerate(chunks):
-            try:
-                embedding = await self.embedding.get_embedding(chunk)
-                payload = {
-                    **metadata,
-                    "page_number": page_num,
-                    "chunk_index": i,
-                    "content_type": "text",
-                    "text": chunk,
+            # Rechercher les documents similaires
+            similar_texts = await self.vector_store.similarity_search(query_embedding[0], k=limit)
+            if not similar_texts:
+                # Retourner une réponse par défaut si aucun document n'est trouvé
+                return {
+                    "answer": "Je suis désolé, je n'ai pas trouvé d'information pertinente dans la documentation disponible.",
+                    "sources": []
                 }
-                await self.vector_store.add_vectors([embedding], [payload])
-            except Exception as e:
-                logger.error(f"Error indexing text chunk {i}: {str(e)}")
 
-    async def _index_image_chunks(self, chunks: List[Dict], metadata: Dict):
-        """Indexe les chunks d'images avec leur contexte."""
-        for i, chunk in enumerate(chunks):
-            try:
-                # Utilisation du texte de contexte pour l'embedding
-                context_embedding = await self.embedding.get_embedding(chunk['text'])
-                
-                # TODO: Ajouter l'embedding de l'image elle-même quand disponible
-                # image_embedding = await self.get_image_embedding(chunk['image_data'])
-                # final_embedding = self.combine_embeddings(context_embedding, image_embedding)
-                
-                await self.vector_store.add_vectors([context_embedding], [chunk])
-            except Exception as e:
-                logger.error(f"Error indexing image chunk {i}: {str(e)}")
+            # Préparer le contexte pour Claude
+            context = "\n\n---\n\n".join([text[0]["text"] for text in similar_texts])
+            
+            # Obtenir la réponse de Claude
+            prompt = f"Question: {query}\n\nContexte: {context}\n\nRépondez à la question en vous basant uniquement sur le contexte fourni. Si vous ne trouvez pas l'information dans le contexte, dites-le clairement."
+            
+            answer = await self.claude.generate_response(prompt)
 
-    def _get_document_metadata(self, doc: fitz.Document, file_path: str, file_hash: str) -> Dict:
-        return {
-            "filename": Path(file_path).name,
-            "title": doc.metadata.get("title", ""),
-            "author": doc.metadata.get("author", ""),
-            "doc_type": "pdf",
-            "page_count": len(doc),
-            "file_path": file_path,
-            "file_hash": file_hash,
-            "indexed_at": datetime.utcnow().isoformat()
-        }
+            return {
+                "answer": answer,
+                "sources": [{
+                    "id": idx,
+                    "score": text[1],
+                    "payload": text[0]
+                } for idx, text in enumerate(similar_texts)]
+            }
 
-    # [Le reste du code existant reste inchangé]
+        except Exception as e:
+            logger.error(f"Error in search: {e}")
+            raise
