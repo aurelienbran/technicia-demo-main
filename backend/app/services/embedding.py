@@ -9,28 +9,24 @@ logger = logging.getLogger("technicia.embedding")
 class EmbeddingService:
     def __init__(self):
         self.api_key = settings.VOYAGE_API_KEY
-        self.api_url = "https://api.voyageai.com/v1/embeddings"
+        self.api_url = "https://api.voyageai.com/v1/multimodal-embeddings"
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
         logger.info("Embedding service initialized")
 
-    async def _make_request(self, texts: Union[str, List[str]], input_type: str = "document") -> Dict:
-        """
-        Fait une requête à l'API Voyage AI.
-        """
+    async def _make_request(self, inputs: Union[str, List[Dict]]) -> Dict:
         try:
             async with httpx.AsyncClient() as client:
+                payload = {
+                    "inputs": inputs if isinstance(inputs, list) else [{"text": inputs}],
+                    "model": "voyage-multimodal-3",
+                }
                 response = await client.post(
                     self.api_url,
                     headers=self.headers,
-                    json={
-                        "input": texts,
-                        "model": "voyage-multimodal-3",
-                        "input_type": input_type,
-                        "truncation": True
-                    },
+                    json=payload,
                     timeout=30.0
                 )
                 response.raise_for_status()
@@ -42,72 +38,47 @@ class EmbeddingService:
             logger.error(f"Unexpected error generating embeddings: {str(e)}")
             raise
 
-    async def get_embedding(self, text: str, input_type: str = "document") -> List[float]:
-        """
-        Génère un embedding pour un seul texte.
-        """
+    async def get_embedding(self, text: str) -> List[float]:
         logger.debug(f"Generating embedding for text: {text[:100]}...")
-        response = await self._make_request(text, input_type)
-        return response["data"][0]["embedding"]
+        response = await self._make_request(text)
+        return response["embeddings"][0]
 
-    async def get_embeddings(self, texts: List[str], input_type: str = "document") -> List[List[float]]:
-        """
-        Génère des embeddings pour une liste de textes.
-        """
+    async def get_embeddings(self, texts: List[str]) -> List[List[float]]:
         if not texts:
             return []
 
         logger.debug(f"Generating embeddings for {len(texts)} texts")
-        response = await self._make_request(texts, input_type)
-        return [item["embedding"] for item in response["data"]]
+        inputs = [{"text": text} for text in texts]
+        response = await self._make_request(inputs)
+        return response["embeddings"]
 
     def compute_similarity(self, embedding1: List[float], embedding2: List[float]) -> float:
-        """
-        Calcule la similarité cosinus entre deux embeddings.
-        """
         vec1 = np.array(embedding1)
         vec2 = np.array(embedding2)
-        
         dot_product = np.dot(vec1, vec2)
         norm1 = np.linalg.norm(vec1)
         norm2 = np.linalg.norm(vec2)
-        
         return dot_product / (norm1 * norm2)
 
     async def chunk_text(self, text: str, chunk_size: int = 1500, overlap: int = 300) -> List[str]:
-        """
-        Découpe un texte long en chunks pour l'embedding.
-        """
         if len(text) <= chunk_size:
             return [text]
 
         chunks = []
         start = 0
-        
         while start < len(text):
-            # Trouver la fin du chunk
             end = start + chunk_size
-            
-            # Ajuster à la fin d'une phrase ou d'un mot si possible
             if end < len(text):
-                # Chercher le dernier point ou espace
                 for char in ['. ', '\n', ' ']:
                     last_pos = text[start:end].rfind(char)
                     if last_pos != -1:
                         end = start + last_pos + 1
                         break
-            
             chunks.append(text[start:end].strip())
             start = end - overlap
-
-        logger.debug(f"Split text into {len(chunks)} chunks")
         return chunks
 
     async def preprocess_text(self, text: str) -> str:
-        """
-        Prétraite le texte avant l'embedding.
-        """
-        # Nettoyage basique
         text = text.replace('\n', ' ').replace('\r', ' ')
-        text = ' '.join(text.split())  # Normalise les espaces
+        text = ' '.join(text.split())
         return text
