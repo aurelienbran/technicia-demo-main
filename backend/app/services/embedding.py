@@ -16,12 +16,12 @@ class EmbeddingService:
         }
         logger.info("Embedding service initialized")
 
-    async def _make_request(self, inputs: Union[str, List[Dict]]) -> Dict:
+    async def _make_request(self, text: Union[str, List[str]]) -> Dict:
         try:
             async with httpx.AsyncClient() as client:
                 payload = {
-                    "input": inputs if isinstance(inputs, list) else [{"text": inputs}],
-                    "model": "voyage-multimodal-3",
+                    "input": text,
+                    "model": "voyage-multimodal-3"
                 }
                 response = await client.post(
                     self.api_url,
@@ -46,10 +46,7 @@ class EmbeddingService:
     async def get_embeddings(self, texts: List[str]) -> List[List[float]]:
         if not texts:
             return []
-        
-        logger.debug(f"Generating embeddings for {len(texts)} texts")
-        inputs = [{"text": text} for text in texts]
-        response = await self._make_request(inputs)
+        response = await self._make_request(texts)
         return [item["embedding"] for item in response["data"]]
 
     def compute_similarity(self, embedding1: List[float], embedding2: List[float]) -> float:
@@ -63,7 +60,6 @@ class EmbeddingService:
     async def chunk_text(self, text: str, chunk_size: int = 1500, overlap: int = 300) -> List[str]:
         if len(text) <= chunk_size:
             return [text]
-
         chunks = []
         start = 0
         while start < len(text):
