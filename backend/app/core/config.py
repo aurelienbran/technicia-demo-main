@@ -2,9 +2,9 @@ import os
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
 
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env'))
 
-DOCS_PATH = "C:/TechnicIADocs"
+DOCS_PATH = "C:\TechnicIADocs"
 
 class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str
@@ -14,5 +14,7 @@ class Settings(BaseSettings):
     DOCS_PATH: str = DOCS_PATH
 
     class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+        env_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env')
+        env_file_encoding = 'utf-8'
+
+settings = Settings()
