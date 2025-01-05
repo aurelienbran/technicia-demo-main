@@ -18,50 +18,61 @@ class IndexingService:
 
     async def index_pdf(self, file_path: str) -> bool:
         try:
-            logger.info(f"Début de l'indexation du PDF: {file_path}")
-            
-            # Vérification du fichier
-            if not os.path.exists(file_path):
-                logger.error(f"Fichier non trouvé: {file_path}")
-                return False
-                
-            # Test de lecture du fichier
+            logger.info(f"Début indexation: {file_path}")
             try:
-                with open(file_path, 'rb') as f:
-                    data = f.read()
-                    logger.info(f"Lecture réussie: {len(data)} bytes")
-            except Exception as e:
-                logger.error(f"Erreur lecture fichier: {e}")
-                return False
+                # Test ouverture en mode binaire
+                pdf_bytes = None
+                try:
+                    with open(file_path, 'rb') as file:
+                        pdf_bytes = file.read()
+                    logger.info(f"Lecture réussie: {len(pdf_bytes)} bytes")
+                except IOError as e:
+                    logger.error(f"Erreur IO: {str(e)}")
+                    logger.error(f"Permissions fichier: {oct(os.stat(file_path).st_mode & 0o777)}")
+                    raise
 
-            # Test d'ouverture PDF
-            try:
-                doc = fitz.open(file_path)
+                # Test PyMuPDF avec bytes
+                doc = fitz.open(stream=pdf_bytes, filetype="pdf")
                 page_count = len(doc)
                 doc.close()
-                logger.info(f"Test PDF réussi: {page_count} pages")
-            except Exception as e:
-                logger.error(f"Échec test PDF: {str(e)}")
-                return False
+                logger.info(f"Test PDF OK: {page_count} pages")
 
-            # Extraction contenu
-            doc_content = await self._extract_pdf_content(file_path)
-            if not doc_content:
+                # Extraction contenu
+                doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                content = []
+
+                # Extraction du texte
+                for page_num in range(page_count):
+                    page = doc[page_num]
+                    text = page.get_text()
+                    if text.strip():
+                        content.append({"text": text, "type": "text"})
+
+                logger.info(f"Extraction réussie: {len(content)} éléments")
+                doc.close()
+
+                if content:
+                    # Génération embeddings
+                    embeddings = await self.embedding_service.get_multimodal_embeddings(content)
+                    if embeddings:
+                        # Stockage Qdrant
+                        metadata = [{
+                            "filename": os.path.basename(file_path),
+                            "page": idx,
+                            "type": "text"
+                        } for idx, _ in enumerate(embeddings)]
+                        
+                        await self.vector_store.store_vectors(embeddings, metadata)
+                        logger.info(f"Indexation réussie")
+                        return True
+
                 logger.error("Aucun contenu extrait")
                 return False
 
-            # Embeddings
-            embeddings = await self.embedding_service.get_multimodal_embeddings(doc_content)
-            if not embeddings:
-                logger.error("Échec génération embeddings")
+            except Exception as e:
+                logger.error(f"Erreur traitement PDF: {str(e)}")
                 return False
 
-            # Stockage Qdrant
-            metadata = self._generate_metadata(file_path, doc_content)
-            await self.vector_store.store_vectors(embeddings, metadata)
-            
-            logger.info(f"Indexation réussie: {file_path}")
-            return True
         except Exception as e:
-            logger.error(f"Erreur indexation: {str(e)}", exc_info=True)
+            logger.error(f"Erreur indexation: {str(e)}")
             return False
