@@ -11,15 +11,20 @@ class FileEventHandler(FileSystemEventHandler):
     def __init__(self, watcher_service):
         self.watcher_service = watcher_service
         self.loop = asyncio.get_event_loop()
+        self.processing_files = set()
         super().__init__()
 
     def on_created(self, event):
         if not event.is_directory and event.src_path.endswith('.pdf'):
-            asyncio.run_coroutine_threadsafe(self.watcher_service.on_created(event), self.loop)
+            if event.src_path not in self.processing_files:
+                self.processing_files.add(event.src_path)
+                asyncio.run_coroutine_threadsafe(self.watcher_service.on_created(event), self.loop)
 
     def on_modified(self, event):
         if not event.is_directory and event.src_path.endswith('.pdf'):
-            asyncio.run_coroutine_threadsafe(self.watcher_service.on_modified(event), self.loop)
+            if event.src_path not in self.processing_files:
+                self.processing_files.add(event.src_path)
+                asyncio.run_coroutine_threadsafe(self.watcher_service.on_modified(event), self.loop)
 
 class WatcherService:
     def __init__(self, watch_path=None, indexing_service=None):
@@ -41,10 +46,16 @@ class WatcherService:
         self.observer.join()
 
     async def on_created(self, event):
-        await self.process_file(event.src_path)
+        try:
+            await self.process_file(event.src_path)
+        finally:
+            self.event_handler.processing_files.remove(event.src_path)
 
     async def on_modified(self, event):
-        await self.process_file(event.src_path)
+        try:
+            await self.process_file(event.src_path)
+        finally:
+            self.event_handler.processing_files.remove(event.src_path)
 
     async def process_file(self, file_path):
         try:
