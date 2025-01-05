@@ -27,11 +27,11 @@ class WatcherService:
         os.makedirs(self.watch_path, exist_ok=True)
         self.observer.schedule(self.event_handler, self.watch_path, recursive=False)
 
-    def start(self):
+    async def start(self):
         logging.info(f"Starting file watcher on {self.watch_path}")
         self.observer.start()
 
-    def stop(self):
+    async def stop(self):
         logging.info("Stopping file watcher")
         self.observer.stop()
         self.observer.join()
