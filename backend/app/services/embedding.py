@@ -16,7 +16,7 @@ class EmbeddingService:
         }
         logger.info("Embedding service initialized")
 
-    async def _make_request(self, texts: Union[str, List[str]]) -> Dict:
+    async def _make_request(self, texts: Union[str, List[str]], input_type: str = "document") -> Dict:
         """
         Fait une requête à l'API Voyage AI.
         """
@@ -27,7 +27,9 @@ class EmbeddingService:
                     headers=self.headers,
                     json={
                         "input": texts,
-                        "model": "voyage-multimodal-3"
+                        "model": "voyage-multimodal-3",
+                        "input_type": input_type,
+                        "truncation": True
                     },
                     timeout=30.0
                 )
@@ -40,15 +42,15 @@ class EmbeddingService:
             logger.error(f"Unexpected error generating embeddings: {str(e)}")
             raise
 
-    async def get_embedding(self, text: str) -> List[float]:
+    async def get_embedding(self, text: str, input_type: str = "document") -> List[float]:
         """
         Génère un embedding pour un seul texte.
         """
         logger.debug(f"Generating embedding for text: {text[:100]}...")
-        response = await self._make_request(text)
+        response = await self._make_request(text, input_type)
         return response["data"][0]["embedding"]
 
-    async def get_embeddings(self, texts: List[str]) -> List[List[float]]:
+    async def get_embeddings(self, texts: List[str], input_type: str = "document") -> List[List[float]]:
         """
         Génère des embeddings pour une liste de textes.
         """
@@ -56,7 +58,7 @@ class EmbeddingService:
             return []
 
         logger.debug(f"Generating embeddings for {len(texts)} texts")
-        response = await self._make_request(texts)
+        response = await self._make_request(texts, input_type)
         return [item["embedding"] for item in response["data"]]
 
     def compute_similarity(self, embedding1: List[float], embedding2: List[float]) -> float:
@@ -72,7 +74,7 @@ class EmbeddingService:
         
         return dot_product / (norm1 * norm2)
 
-    async def chunk_text(self, text: str, chunk_size: int = 1000, overlap: int = 100) -> List[str]:
+    async def chunk_text(self, text: str, chunk_size: int = 1500, overlap: int = 300) -> List[str]:
         """
         Découpe un texte long en chunks pour l'embedding.
         """
