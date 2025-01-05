@@ -1,81 +1,76 @@
 import logging
-from qdrant_client import QdrantClient, models
-from qdrant_client.http import models as rest
-from qdrant_client.http.models import Distance, VectorParams
-import random
+from typing import List, Dict, Any
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams, PointStruct
+from ..core.config import settings
 
 logger = logging.getLogger("technicia.vector_store")
 
 class VectorStore:
-    def __init__(self, host="localhost", port=6333, collection_name="technical_docs"):
-        self.client = QdrantClient(host=host, port=port)
-        self.collection_name = collection_name
+    def __init__(self):
+        self.client = QdrantClient(settings.QDRANT_HOST, port=settings.QDRANT_PORT)
+        self.collection_name = "technical_docs"
+        self.vector_size = 1024  # voyage-multimodal-3 dimension
         self._ensure_collection_exists()
 
     def _ensure_collection_exists(self):
         collections = self.client.get_collections().collections
-        exists = any(col.name == self.collection_name for col in collections)
+        exists = any(c.name == self.collection_name for c in collections)
         
         if not exists:
             self.client.create_collection(
                 collection_name=self.collection_name,
-                vectors_config=VectorParams(size=1024, distance=Distance.COSINE)
+                vectors_config=VectorParams(size=self.vector_size, distance=Distance.COSINE)
             )
-            logger.info(f"Created collection: {self.collection_name}")
+            logger.info(f"Collection {self.collection_name} created")
         else:
             logger.info(f"Collection {self.collection_name} exists")
 
-    async def clear_file(self, file_path: str) -> None:
-        try:
-            self.client.delete(
-                collection_name=self.collection_name,
-                points_selector=models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="file_path",
-                            match=models.MatchValue(value=file_path)
-                        )
-                    ]
-                )
-            )
-        except Exception as e:
-            logger.error(f"Error clearing file vectors: {e}")
-            raise
+    async def store_vectors(self, embeddings: List[List[float]], metadata: List[Dict[str, Any]]):
+        if len(embeddings) != len(metadata):
+            raise ValueError("Number of embeddings must match number of metadata items")
 
-    async def add_texts(self, texts, metadatas, embeddings):
+        points = [
+            PointStruct(
+                id=i,
+                vector=embedding,
+                payload=meta
+            )
+            for i, (embedding, meta) in enumerate(zip(embeddings, metadata))
+        ]
+
         try:
-            points = []
-            for i, (text, metadata, embedding) in enumerate(zip(texts, metadatas, embeddings)):
-                point_id = random.randint(1, 2**31-1)
-                points.append(models.PointStruct(
-                    id=point_id,
-                    payload={
-                        "text": text,
-                        "file_path": metadata.get("file_path", ""),
-                        "page": metadata.get("page", 0),
-                        "chunk_index": metadata.get("chunk_index", 0),
-                        "hash": metadata.get("hash", "")
-                    },
-                    vector=embedding
-                ))
-            
             self.client.upsert(
                 collection_name=self.collection_name,
                 points=points
             )
-            return True
+            logger.info(f"Stored {len(points)} vectors successfully")
         except Exception as e:
-            logger.error(f"Error adding texts: {e}")
-            return False
+            logger.error(f"Error storing vectors: {str(e)}")
+            raise
 
-    async def similarity_search(self, query_embedding, k=5):
+    async def search_vectors(self, query_vector: List[float], limit: int = 5) -> List[Dict[str, Any]]:
         try:
             results = self.client.search(
                 collection_name=self.collection_name,
-                query_vector=query_embedding,
-                limit=k
+                query_vector=query_vector,
+                limit=limit,
+                score_threshold=0.7
             )
-            return [(hit.payload, hit.score) for hit in results]
+
+            return [{
+                "score": hit.score,
+                "metadata": hit.payload,
+                "id": hit.id
+            } for hit in results]
         except Exception as e:
-            logger.error(f"Error during search: {e}")
-            return []
+            logger.error(f"Error searching vectors: {str(e)}")
+            raise
+
+    async def delete_collection(self):
+        try:
+            self.client.delete_collection(self.collection_name)
+            logger.info(f"Collection {self.collection_name} deleted")
+        except Exception as e:
+            logger.error(f"Error deleting collection: {str(e)}")
+            raise
