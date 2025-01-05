@@ -19,11 +19,11 @@ class FileEventHandler(FileSystemEventHandler):
             asyncio.create_task(self.watcher_service.on_modified(event))
 
 class WatcherService:
-    def __init__(self):
+    def __init__(self, watch_path=None, indexing_service=None):
         self.observer = Observer()
         self.event_handler = FileEventHandler(self)
-        self.indexing_service = IndexingService()
-        self.watch_path = os.path.join(os.path.dirname(__file__), '..', '..', 'docs')
+        self.indexing_service = indexing_service or IndexingService()
+        self.watch_path = watch_path or os.path.join(os.path.dirname(__file__), '..', '..', 'docs')
         os.makedirs(self.watch_path, exist_ok=True)
         self.observer.schedule(self.event_handler, self.watch_path, recursive=False)
 
