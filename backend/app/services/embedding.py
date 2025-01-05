@@ -9,7 +9,7 @@ logger = logging.getLogger("technicia.embedding")
 class EmbeddingService:
     def __init__(self):
         self.api_key = settings.VOYAGE_API_KEY
-        self.api_url = "https://api.voyageai.com/v1/embeddings"
+        self.api_url = "https://api.voyageai.com/v1/multimodalembeddings"
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
@@ -25,18 +25,19 @@ class EmbeddingService:
                 logger.info(f"Processing batch {i//batch_size + 1}/{(len(inputs) + batch_size - 1)//batch_size}")
                 
                 async with httpx.AsyncClient() as client:
+                    payload = {
+                        "model": "voyage-multimodal-3",
+                        "inputs": [{"content": item} for item in batch]
+                    }
                     response = await client.post(
                         self.api_url,
                         headers=self.headers,
-                        json={
-                            "model": "voyage-multimodal-3",
-                            "input": batch
-                        },
+                        json=payload,
                         timeout=60.0
                     )
                     response.raise_for_status()
                     batch_result = response.json()
-                    all_embeddings.extend(batch_result["data"])
+                    all_embeddings.extend(batch_result["embeddings"])
             
             return {"data": all_embeddings}
                     
@@ -50,13 +51,17 @@ class EmbeddingService:
             
         formatted_inputs = []
         for doc in documents:
+            content = []
             if doc["type"] == "text":
-                formatted_inputs.append({"text": doc["text"]})
+                content.append({"text": doc["text"]})
             elif doc["type"] == "image":
-                input_data = {"image": {"data": doc["image"]}}
+                image_data = {"image": {"data": doc["image"]}}
                 if doc.get("context"):
-                    input_data["text"] = doc["context"]
-                formatted_inputs.append(input_data)
+                    content.append(image_data)
+                    content.append({"text": doc["context"]})
+                else:
+                    content.append(image_data)
+            formatted_inputs.extend(content)
 
         logger.info(f"Generating embeddings for {len(formatted_inputs)} inputs")
         response = await self._make_request(formatted_inputs, self.batch_size)
