@@ -10,11 +10,8 @@ import logging
 logger = logging.getLogger("technicia.main")
 
 app = FastAPI(title="TechnicIA API")
-
-# Configuration du niveau de logging
 logging.basicConfig(level=logging.INFO)
 
-# Services
 indexing_service = IndexingService()
 watcher_service = None
 
@@ -26,27 +23,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(chat.router, prefix="/api")
+app.include_router(chat.router)
 
 @app.on_event("startup")
 async def startup_event():
     global watcher_service
     logger.info("Starting TechnicIA API...")
     
-    # Configurer le dossier docs
-    docs_path = os.path.join(os.path.dirname(__file__), "docs")
-    os.makedirs(docs_path, exist_ok=True)
-    logger.info(f"Docs directory configured: {docs_path}")
+    os.makedirs(settings.DOCS_PATH, exist_ok=True)
+    logger.info(f"Docs directory configured: {settings.DOCS_PATH}")
     
-    # Démarrer le service de surveillance
-    watcher_service = WatcherService(docs_path, indexing_service)
+    watcher_service = WatcherService(settings.DOCS_PATH, indexing_service)
     await watcher_service.start()
-    logger.info("Watcher service started")
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    global watcher_service
-    logger.info("Shutting down TechnicIA API...")
     if watcher_service:
         await watcher_service.stop()
-        logger.info("Watcher service stopped")
