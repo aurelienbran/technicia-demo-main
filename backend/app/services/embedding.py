@@ -51,12 +51,12 @@ class EmbeddingService:
         formatted_inputs = []
         for doc in documents:
             if doc["type"] == "text":
-                formatted_inputs.append(doc["text"])
+                formatted_inputs.append({"text": doc["text"]})
             elif doc["type"] == "image":
-                formatted_inputs.append({
-                    "image": doc["image"],
-                    "text": doc["context"] if doc["context"] else ""
-                })
+                input_data = {"image": {"data": doc["image"]}}
+                if doc.get("context"):
+                    input_data["text"] = doc["context"]
+                formatted_inputs.append(input_data)
 
         logger.info(f"Generating embeddings for {len(formatted_inputs)} inputs")
         response = await self._make_request(formatted_inputs, self.batch_size)
