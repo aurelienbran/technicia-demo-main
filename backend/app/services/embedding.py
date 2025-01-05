@@ -14,92 +14,50 @@ class EmbeddingService:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
-        self.batch_size = 32  # Limite batch pour optimiser
+        self.batch_size = 32
         logger.info("Embedding service initialized")
 
-    async def _make_request(self, inputs: List[Dict[str, Any]]) -> Dict:
+    async def _make_request(self, inputs: List[Dict[str, Any]], batch_size: int = 32) -> Dict:
         try:
-            async with httpx.AsyncClient() as client:
-                if len(inputs) > self.batch_size:
-                    logger.warning(f"Large batch size ({len(inputs)}) detected, splitting into chunks")
-                    # Traiter par lots
-                    all_embeddings = []
-                    for i in range(0, len(inputs), self.batch_size):
-                        batch = inputs[i:i + self.batch_size]
-                        payload = {
-                            "input": batch,
-                            "model": "voyage-multimodal-3",
-                            "encoding_format": None
-                        }
-                        response = await client.post(
-                            self.api_url,
-                            headers=self.headers,
-                            json=payload,
-                            timeout=30.0
-                        )
-                        response.raise_for_status()
-                        all_embeddings.extend(response.json()["data"])
-                    return {"data": all_embeddings}
-                else:
-                    payload = {
-                        "input": inputs,
-                        "model": "voyage-multimodal-3",
-                        "encoding_format": None
-                    }
+            all_embeddings = []
+            for i in range(0, len(inputs), batch_size):
+                batch = inputs[i:i + batch_size]
+                logger.info(f"Processing batch {i//batch_size + 1}/{(len(inputs) + batch_size - 1)//batch_size}")
+                
+                async with httpx.AsyncClient() as client:
                     response = await client.post(
                         self.api_url,
                         headers=self.headers,
-                        json=payload,
-                        timeout=30.0
+                        json={
+                            "model": "voyage-multimodal-3",
+                            "input": batch
+                        },
+                        timeout=60.0
                     )
                     response.raise_for_status()
-                    return response.json()
+                    batch_result = response.json()
+                    all_embeddings.extend(batch_result["data"])
+            
+            return {"data": all_embeddings}
+                    
         except httpx.HTTPError as e:
             logger.error(f"Error calling Voyage AI API: {str(e)}")
             raise
-        except Exception as e:
-            logger.error(f"Unexpected error generating embeddings: {str(e)}")
-            raise
-
-    async def get_embedding_for_text(self, text: str) -> List[float]:
-        """Génère un embedding pour du texte simple"""
-        logger.debug(f"Generating embedding for text: {text[:100]}...")
-        response = await self._make_request([{"text": text}])
-        return response["data"][0]["embedding"]
-
-    async def get_embedding_for_image(self, image_b64: str, context: str = "") -> List[float]:
-        """Génère un embedding pour une image avec contexte optionnel"""
-        input_data = {"image": {"data": image_b64}}
-        if context:
-            input_data["text"] = context
-        response = await self._make_request([input_data])
-        return response["data"][0]["embedding"]
-
+            
     async def get_multimodal_embeddings(self, documents: List[Dict[str, Any]]) -> List[List[float]]:
-        """Génère des embeddings pour une liste de documents multimodaux"""
         if not documents:
             return []
-        
-        # Format correct pour chaque document
+            
         formatted_inputs = []
         for doc in documents:
-            if "text" in doc:
-                formatted_inputs.append({"text": doc["text"]})
-            elif "image" in doc:
-                input_data = {"image": {"data": doc["image"]}}
-                if "context" in doc:
-                    input_data["text"] = doc["context"]
-                formatted_inputs.append(input_data)
+            if doc["type"] == "text":
+                formatted_inputs.append(doc["text"])
+            elif doc["type"] == "image":
+                formatted_inputs.append({
+                    "image": doc["image"],
+                    "text": doc["context"] if doc["context"] else ""
+                })
 
-        logger.debug(f"Generating embeddings for {len(formatted_inputs)} inputs")
-        response = await self._make_request(formatted_inputs)
+        logger.info(f"Generating embeddings for {len(formatted_inputs)} inputs")
+        response = await self._make_request(formatted_inputs, self.batch_size)
         return [item["embedding"] for item in response["data"]]
-
-    def compute_similarity(self, embedding1: List[float], embedding2: List[float]) -> float:
-        """Calcule la similarité cosinus entre deux embeddings"""
-        vec1 = np.array(embedding1)
-        vec2 = np.array(embedding2)
-        dot_product = np.dot(vec1, vec2)
-        norm1 = np.linalg.norm(vec1)
-        norm2 = np.linalg.norm(vec2)
-        return dot_product / (norm1 * norm2)
