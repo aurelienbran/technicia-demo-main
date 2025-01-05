@@ -9,7 +9,7 @@ logger = logging.getLogger("technicia.embedding")
 class EmbeddingService:
     def __init__(self):
         self.api_key = settings.VOYAGE_API_KEY
-        self.api_url = "https://api.voyageai.com/v1/multimodal-embeddings"
+        self.api_url = "https://api.voyageai.com/v1/embeddings"
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
@@ -20,7 +20,7 @@ class EmbeddingService:
         try:
             async with httpx.AsyncClient() as client:
                 payload = {
-                    "inputs": inputs if isinstance(inputs, list) else [{"text": inputs}],
+                    "input": inputs if isinstance(inputs, list) else [{"text": inputs}],
                     "model": "voyage-multimodal-3",
                 }
                 response = await client.post(
@@ -41,16 +41,16 @@ class EmbeddingService:
     async def get_embedding(self, text: str) -> List[float]:
         logger.debug(f"Generating embedding for text: {text[:100]}...")
         response = await self._make_request(text)
-        return response["embeddings"][0]
+        return response["data"][0]["embedding"]
 
     async def get_embeddings(self, texts: List[str]) -> List[List[float]]:
         if not texts:
             return []
-
+        
         logger.debug(f"Generating embeddings for {len(texts)} texts")
         inputs = [{"text": text} for text in texts]
         response = await self._make_request(inputs)
-        return response["embeddings"]
+        return [item["embedding"] for item in response["data"]]
 
     def compute_similarity(self, embedding1: List[float], embedding2: List[float]) -> float:
         vec1 = np.array(embedding1)
