@@ -16,7 +16,6 @@ class VectorStore:
         self.log_collection_status()
     
     def ensure_collection_exists(self):
-        """Crée la collection si elle n'existe pas."""
         collections = self.client.get_collections()
         collection_names = [collection.name for collection in collections.collections]
         
@@ -33,7 +32,6 @@ class VectorStore:
             logger.info(f"Collection {settings.COLLECTION_NAME} exists")
 
     def log_collection_status(self):
-        """Affiche le contenu de la collection."""
         try:
             points = self.client.scroll(
                 collection_name=settings.COLLECTION_NAME,
@@ -51,7 +49,6 @@ class VectorStore:
             logger.error(f"Error checking collection status: {str(e)}")
 
     async def store_vectors(self, points: List[List[float]], metadata: List[Dict[str, Any]]) -> bool:
-        """Stocke les vecteurs dans Qdrant."""
         try:
             qdrant_points = [
                 models.PointStruct(
@@ -75,8 +72,7 @@ class VectorStore:
             logger.error(f"Error storing vectors: {str(e)}")
             return False
 
-    async def search(self, query_vector: List[float], limit: int = 5, score_threshold: float = 0.7) -> List[Dict[str, Any]]:
-        """Recherche les vecteurs les plus similaires."""
+    async def search(self, query_vector: List[float], limit: int = 5, score_threshold: float = 0.3) -> List[Dict[str, Any]]:
         try:
             results = self.client.search(
                 collection_name=settings.COLLECTION_NAME,
@@ -96,7 +92,12 @@ class VectorStore:
                 for hit in results
             ]
             
-            logger.info(f"Found {len(matches)} matches")
+            if matches:
+                logger.info(f"Found {len(matches)} matches. Best score: {matches[0]['score']}")
+                logger.info(f"First match content: {matches[0]['content'][:100]}...")
+            else:
+                logger.info("No matches found")
+                
             return sorted(matches, key=lambda x: x["score"], reverse=True)
             
         except Exception as e:
@@ -104,7 +105,6 @@ class VectorStore:
             return []
 
     async def file_exists(self, file_path: str) -> bool:
-        """Vérifie si un fichier est déjà indexé."""
         try:
             result = self.client.scroll(
                 collection_name=settings.COLLECTION_NAME,
