@@ -25,6 +25,35 @@ class IndexingService:
         self.max_retries = 3
         self.retry_delay = 1
 
+    async def search(self, query: str, limit: int = 5) -> Dict[str, Any]:
+        """Recherche sémantique dans les documents indexés."""
+        try:
+            # Générer l'embedding de la requête
+            query_embedding = await self.embedding_service.get_multimodal_embeddings([[query]])
+            if not query_embedding or not query_embedding[0]:
+                return {
+                    "matches": [],
+                    "error": "Failed to generate query embedding"
+                }
+
+            # Rechercher les documents similaires
+            results = await self.vector_store.search(
+                query_vector=query_embedding[0],
+                limit=limit
+            )
+
+            return {
+                "matches": results,
+                "query": query
+            }
+
+        except Exception as e:
+            logger.error(f"Error during search: {str(e)}")
+            return {
+                "matches": [],
+                "error": str(e)
+            }
+
     def _resize_image_if_needed(self, image: Image.Image) -> Image.Image:
         """Redimensionne l'image si elle dépasse la taille maximale."""
         if image.size[0] > MAX_IMAGE_SIZE[0] or image.size[1] > MAX_IMAGE_SIZE[1]:
