@@ -5,7 +5,9 @@ import tempfile
 import stat
 import logging
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
+from PIL import Image
+import io
 from .vector_store import VectorStore
 from .embedding import EmbeddingService
 
@@ -20,7 +22,7 @@ class IndexingService:
         self.max_retries = 3
         self.retry_delay = 1
 
-    def _extract_images_from_page(self, page) -> List[Dict[str, Any]]:
+    def _extract_images_from_page(self, page) -> List[Tuple[Image.Image, str]]:
         """Extrait les images d'une page PDF avec leur contexte."""
         images = []
         
@@ -35,16 +37,25 @@ class IndexingService:
                     if base_image:
                         image_bytes = base_image["image"]
                         
-                        # Récupérer le texte environnant comme contexte
-                        # Utiliser img_info[0] pour les coordonnées de l'image
-                        rect = page.get_image_rects(img_info[0])[0]  # Premier rectangle trouvé
-                        surrounding_text = page.get_text("text", clip=rect.expand(50))  # 50 points autour de l'image
+                        # Convertir en PIL Image
+                        pil_image = Image.open(io.BytesIO(image_bytes))
                         
-                        images.append({
-                            "type": "image",
-                            "image": image_bytes,
-                            "context": surrounding_text.strip() if surrounding_text else None
-                        })
+                        # Récupérer le texte environnant comme contexte
+                        # Utiliser les coordonnées de l'image pour obtenir le texte proche
+                        rect = page.get_image_rects(img_info[0])[0]  # Premier rectangle trouvé
+                        # Agrandir la zone de recherche de texte
+                        extended_rect = fitz.Rect(
+                            rect.x0 - 50,  # étendre à gauche
+                            rect.y0 - 50,  # étendre en haut
+                            rect.x1 + 50,  # étendre à droite
+                            rect.y1 + 50   # étendre en bas
+                        )
+                        surrounding_text = page.get_text("text", clip=extended_rect)
+                        
+                        if surrounding_text.strip():
+                            images.append((pil_image, surrounding_text.strip()))
+                        else:
+                            images.append((pil_image, None))
                         
                 except Exception as e:
                     logger.error(f"Error extracting specific image: {str(e)}")
@@ -106,36 +117,40 @@ class IndexingService:
 
             # Extraction contenu
             doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-            content = []
+            contents = []
 
             # Extraction du texte et des images
             for page_num in range(page_count):
                 page = doc[page_num]
                 
-                # Extraire le texte
-                text = page.get_text()
-                if text.strip():
-                    content.append({"type": "text", "text": text})
+                # Extraire le texte (un groupe de contenu par page)
+                text = page.get_text().strip()
+                if text:
+                    contents.append([text])
                 
                 # Extraire les images
                 page_images = self._extract_images_from_page(page)
-                content.extend(page_images)
+                for img, context in page_images:
+                    if context:
+                        contents.append([img, context])
+                    else:
+                        contents.append([img])
 
-            logger.info(f"Extraction réussie: {len(content)} éléments")
+            logger.info(f"Extraction réussie: {len(contents)} éléments")
             doc.close()
 
-            if content:
+            if contents:
                 # Génération embeddings
-                embeddings = await self.embedding_service.get_multimodal_embeddings(content)
+                embeddings = await self.embedding_service.get_multimodal_embeddings(contents)
                 if embeddings:
                     # Stockage Qdrant
                     metadata = [{
                         "filename": os.path.basename(file_path),
-                        "page": idx,
-                        "type": "text" if idx < page_count else "image"
-                    } for idx, _ in enumerate(embeddings)]
+                        "page": idx // 2,  # Estimation de la page
+                        "type": "multimodal"
+                    } for idx in range(len(embeddings))]
                     
-                    await self.vector_store.add_texts(content, metadata, embeddings)
+                    await self.vector_store.add_texts(contents, metadata, embeddings)
                     logger.info(f"Indexation réussie")
                     return True
 
