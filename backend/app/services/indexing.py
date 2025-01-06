@@ -1,32 +1,38 @@
 import logging
 import hashlib
 import os
+from pathlib import Path
 from typing import List, Dict, Optional
 import fitz  # PyMuPDF
 
 logger = logging.getLogger("technicia.indexing")
 
 class IndexingService:
-    def __init__(self, embedding_service, vector_store):
+    def __init__(self, embedding_service, vector_store, storage_service):
         self.embedding_service = embedding_service
         self.vector_store = vector_store
+        self.storage_service = storage_service
         self.chunk_size = 1500
         self.chunk_overlap = 300
 
-    def _get_file_hash(self, file_path: str) -> str:
-        """Generate a unique hash for a file based on its path, size, and modification time."""
+    def _get_file_hash(self, file_path: Path) -> str:
         try:
-            file_stat = os.stat(file_path)
-            file_info = f"{file_path}|{file_stat.st_size}|{file_stat.st_mtime}"
+            stat_info = os.stat(file_path)
+            file_info = f"{file_path}|{stat_info.st_size}|{stat_info.st_mtime}"
             return hashlib.sha256(file_info.encode()).hexdigest()
         except Exception as e:
-            logger.error(f"Error generating file hash: {e}")
+            logger.error(f"Erreur lors de la génération du hash: {str(e)}")
             raise
 
-    def _extract_text_from_pdf(self, file_path: str) -> List[Dict[str, any]]:
-        """Extract text from PDF and split into chunks."""
+    def _extract_text_from_pdf(self, file_path: Path) -> List[Dict[str, any]]:
         try:
-            doc = fitz.open(file_path)
+            # Utiliser le service de stockage pour lire le fichier
+            pdf_content = self.storage_service.safe_read_file(file_path)
+            if not pdf_content:
+                raise IOError("Impossible de lire le fichier PDF")
+
+            # Ouvrir le PDF depuis les données en mémoire
+            doc = fitz.open(stream=pdf_content, filetype="pdf")
             text_chunks = []
             
             for page_num in range(len(doc)):
@@ -48,32 +54,37 @@ class IndexingService:
                         })
                     start += self.chunk_size - self.chunk_overlap
             
+            # Fermer le document
+            doc.close()
             return text_chunks
+
         except Exception as e:
-            logger.error(f"Error extracting text from PDF: {e}")
+            logger.error(f"Erreur lors de l'extraction du texte: {str(e)}")
             raise
 
-    async def process_file(self, file_path: str) -> bool:
-        """Process a PDF file for indexing."""
+    async def process_file(self, file_path: Path) -> bool:
         try:
+            # Vérifier les permissions du fichier
+            perms = self.storage_service.check_permissions(file_path)
+            if not perms.get("exists") or not perms.get("is_file"):
+                logger.error(f"Fichier non valide ou inaccessible: {file_path}")
+                return False
+
             file_hash = self._get_file_hash(file_path)
             
-            # Check if file already exists in vector store
-            if self.vector_store.file_exists(file_path):
-                logger.info(f"File {file_path} already indexed, skipping")
+            if self.vector_store.file_exists(str(file_path)):
+                logger.info(f"Fichier {file_path} déjà indexé, ignoré")
                 return True
             
-            # Extract text chunks from PDF
             chunks = self._extract_text_from_pdf(file_path)
             if not chunks:
-                logger.warning(f"No text extracted from {file_path}")
+                logger.warning(f"Pas de texte extrait de {file_path}")
                 return False
             
-            # Prepare data for embedding
             texts = [chunk["text"] for chunk in chunks]
             metadatas = [
                 {
-                    "file_path": file_path,
+                    "file_path": str(file_path),
                     "page": chunk["page"],
                     "chunk_index": chunk["chunk_index"],
                     "chunk_id": f"{file_hash}_{chunk['chunk_index']}"
@@ -81,21 +92,19 @@ class IndexingService:
                 for chunk in chunks
             ]
             
-            # Generate embeddings
             embeddings = await self.embedding_service.get_embeddings(texts)
             if not embeddings:
-                logger.error("Failed to generate embeddings")
+                logger.error("Échec de la génération des embeddings")
                 return False
             
-            # Add to vector store
             success = await self.vector_store.add_texts(texts, metadatas, embeddings)
             if success:
-                logger.info(f"Successfully indexed {file_path}")
+                logger.info(f"Indexation réussie de {file_path}")
                 return True
             else:
-                logger.error(f"Failed to add vectors to store for {file_path}")
+                logger.error(f"Échec de l'ajout des vecteurs pour {file_path}")
                 return False
                 
         except Exception as e:
-            logger.error(f"Unexpected error: {e}")
+            logger.error(f"Erreur inattendue: {str(e)}")
             return False

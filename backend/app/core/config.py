@@ -1,5 +1,7 @@
 from pydantic_settings import BaseSettings
 from typing import Optional
+import os
+import sys
 
 class Settings(BaseSettings):
     # API Keys
@@ -15,7 +17,7 @@ class Settings(BaseSettings):
     QDRANT_HOST: str = "localhost"
     QDRANT_PORT: int = 6333
     COLLECTION_NAME: str = "technical_docs"
-    VECTOR_SIZE: int = 1024  # Voyage AI dimension
+    VECTOR_SIZE: int = 1024
     
     # Chunking Configuration
     CHUNK_SIZE: int = 1000
@@ -30,13 +32,17 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     
     # Storage Configuration
-    STORAGE_PATH: str = "storage/pdfs"
-    INDEX_PATH: str = "storage/index"
+    DOCS_PATH: str = "C:\\TechnicIADocs"  # Chemin par défaut
+    
+    def get_docs_path(self) -> str:
+        """Retourne le chemin absolu du dossier des documents."""
+        if os.path.isabs(self.DOCS_PATH):
+            return self.DOCS_PATH
+        return os.path.abspath(os.path.join(os.path.dirname(sys.argv[0]), self.DOCS_PATH))
     
     class Config:
         env_file = ".env"
         case_sensitive = True
-        # Autoriser des champs supplémentaires dans le fichier .env
         extra = "allow"
 
 settings = Settings()
