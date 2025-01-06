@@ -1,22 +1,16 @@
-from pydantic import BaseModel, Field
-from typing import List, Optional
+from pydantic import BaseModel
+from typing import List, Dict, Any, Optional
 
 class QueryRequest(BaseModel):
     query: str
-    limit: Optional[int] = 5
-
-class Source(BaseModel):
-    id: int
-    score: float
-    payload: dict
+    limit: int = 5
 
 class QueryResponse(BaseModel):
-    answer: str
-    sources: List[Source]
+    matches: List[Dict[str, Any]]
+    query: Optional[str] = None
+    error: Optional[str] = None
 
 class IndexResponse(BaseModel):
     status: str
-    file: Optional[str] = None
-    chunks_processed: Optional[int] = 0
-    metadata: Optional[dict] = Field(default={})
-    error: Optional[str] = Field(default=None)
+    metadata: Dict[str, Any]
+    error: Optional[str] = None
