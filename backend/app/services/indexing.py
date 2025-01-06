@@ -144,28 +144,40 @@ class IndexingService:
                 
                 text = page.get_text().strip()
                 if text:
-                    contents.append([text])
+                    contents.append((text, None))
                 
                 page_images = self._extract_images_from_page(page)
                 for img, context in page_images:
-                    if context:
-                        contents.append([img, context])
-                    else:
-                        contents.append([img])
+                    contents.append((img, context))
 
             logger.info(f"Extraction réussie: {len(contents)} éléments")
             doc.close()
 
             if contents:
-                embeddings = await self.embedding_service.get_multimodal_embeddings(contents)
+                # Préparer les données pour l'indexation
+                contents_for_embedding = [
+                    [content_item[0]] if content_item[1] is None else [content_item[0], content_item[1]]
+                    for content_item in contents
+                ]
+                
+                embeddings = await self.embedding_service.get_multimodal_embeddings(contents_for_embedding)
                 if embeddings:
-                    metadata = [{
-                        "filename": os.path.basename(file_path),
-                        "page": idx // 2,
-                        "content": content[0] if len(content) == 1 else context,
-                        "type": "multimodal"
-                    } for idx, (content, context) in enumerate(zip(contents, [None] * len(contents)))
-                    ]
+                    # Construire les métadonnées
+                    metadata = []
+                    for idx, ((content, context), _) in enumerate(zip(contents, embeddings)):
+                        meta = {
+                            "filename": os.path.basename(file_path),
+                            "page": idx // 2,
+                            "type": "text" if isinstance(content, str) else "image"
+                        }
+                        
+                        # Ajouter le bon contenu textuel
+                        if isinstance(content, str):
+                            meta["content"] = content
+                        elif context:
+                            meta["content"] = context
+                        
+                        metadata.append(meta)
                     
                     success = await self.vector_store.store_vectors(embeddings, metadata)
                     if success:
