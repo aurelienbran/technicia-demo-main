@@ -1,94 +1,85 @@
 import logging
 from typing import List, Dict, Any
-from qdrant_client import QdrantClient, models
-from qdrant_client.models import Distance, VectorParams, PointStruct
+from qdrant_client import QdrantClient
+from qdrant_client.http import models
 from ..core.config import settings
 
 logger = logging.getLogger("technicia.vector_store")
 
 class VectorStore:
     def __init__(self):
-        self.client = QdrantClient(settings.QDRANT_HOST, port=settings.QDRANT_PORT)
-        self.collection_name = "technical_docs"
-        self.vector_size = 1024  # voyage-multimodal-3 dimension
+        self.client = QdrantClient(
+            host=settings.QDRANT_HOST,
+            port=settings.QDRANT_PORT
+        )
         self._ensure_collection_exists()
-
-    def _ensure_collection_exists(self):
-        collections = self.client.get_collections().collections
-        exists = any(c.name == self.collection_name for c in collections)
         
-        if not exists:
+    def _ensure_collection_exists(self):
+        """Vérifie si la collection existe, la crée si nécessaire."""
+        collections = self.client.get_collections()
+        collection_names = [collection.name for collection in collections.collections]
+        
+        if settings.COLLECTION_NAME not in collection_names:
             self.client.create_collection(
-                collection_name=self.collection_name,
-                vectors_config=VectorParams(size=self.vector_size, distance=Distance.COSINE)
-            )
-            logger.info(f"Collection {self.collection_name} created")
-        else:
-            logger.info(f"Collection {self.collection_name} exists")
-
-    async def store_vectors(self, embeddings: List[List[float]], metadata: List[Dict[str, Any]]):
-        if len(embeddings) != len(metadata):
-            raise ValueError("Number of embeddings must match number of metadata items")
-
-        points = [
-            PointStruct(
-                id=i,
-                vector=embedding,
-                payload=meta
-            )
-            for i, (embedding, meta) in enumerate(zip(embeddings, metadata))
-        ]
-
-        try:
-            self.client.upsert(
-                collection_name=self.collection_name,
-                points=points
-            )
-            logger.info(f"Stored {len(points)} vectors successfully")
-        except Exception as e:
-            logger.error(f"Error storing vectors: {str(e)}")
-            raise
-
-    async def search_vectors(self, query_vector: List[float], limit: int = 5) -> List[Dict[str, Any]]:
-        try:
-            results = self.client.search(
-                collection_name=self.collection_name,
-                query_vector=query_vector,
-                limit=limit,
-                score_threshold=0.7
-            )
-
-            return [{
-                "score": hit.score,
-                "metadata": hit.payload,
-                "id": hit.id
-            } for hit in results]
-        except Exception as e:
-            logger.error(f"Error searching vectors: {str(e)}")
-            raise
-
-    async def delete_vectors_by_filename(self, filename: str):
-        try:
-            self.client.delete(
-                collection_name=self.collection_name,
-                points_selector=models.FilterSelector(
-                    filter=models.Filter(
-                        must=[models.FieldCondition(
-                            key="filename",
-                            match=models.MatchValue(value=filename)
-                        )]
-                    )
+                collection_name=settings.COLLECTION_NAME,
+                vectors_config=models.VectorParams(
+                    size=settings.VECTOR_SIZE,
+                    distance=models.Distance.COSINE
                 )
             )
-            logger.info(f"Vectors deleted for file: {filename}")
-        except Exception as e:
-            logger.error(f"Error deleting vectors: {str(e)}")
-            raise
+            logger.info(f"Collection {settings.COLLECTION_NAME} created")
+        else:
+            logger.info(f"Collection {settings.COLLECTION_NAME} exists")
 
-    async def delete_collection(self):
+    async def store_vectors(self, points: List[List[float]], metadata: List[Dict[str, Any]]) -> bool:
+        """Stocke les vecteurs et leurs métadonnées dans Qdrant.
+        
+        Args:
+            points: Liste de vecteurs d'embeddings
+            metadata: Liste de métadonnées associées
+            
+        Returns:
+            bool: True si le stockage a réussi
+        """
         try:
-            self.client.delete_collection(self.collection_name)
-            logger.info(f"Collection {self.collection_name} deleted")
+            # Préparer les points avec leurs IDs et métadonnées
+            qdrant_points = [
+                models.PointStruct(
+                    id=i,
+                    vector=vector.tolist() if hasattr(vector, 'tolist') else vector,
+                    payload=meta
+                )
+                for i, (vector, meta) in enumerate(zip(points, metadata))
+            ]
+            
+            # Utiliser upsert pour ajouter ou mettre à jour les points
+            self.client.upsert(
+                collection_name=settings.COLLECTION_NAME,
+                points=qdrant_points,
+                wait=True  # Attendre la confirmation
+            )
+            
+            logger.info(f"Stored {len(points)} vectors successfully")
+            return True
+            
         except Exception as e:
-            logger.error(f"Error deleting collection: {str(e)}")
-            raise
+            logger.error(f"Error storing vectors: {str(e)}")
+            return False
+
+    async def file_exists(self, file_path: str) -> bool:
+        """Vérifie si un fichier a déjà été indexé."""
+        try:
+            result = self.client.scroll(
+                collection_name=settings.COLLECTION_NAME,
+                scroll_filter=models.Filter(
+                    must=[models.FieldCondition(
+                        key="filename",
+                        match=models.MatchValue(value=file_path)
+                    )]
+                ),
+                limit=1
+            )
+            return len(result[0]) > 0
+        except Exception as e:
+            logger.error(f"Error checking file existence: {str(e)}")
+            return False
