@@ -17,7 +17,7 @@ class EmbeddingService:
         self.batch_size = 32
         logger.info("Embedding service initialized")
 
-    async def _make_request(self, inputs: List[Dict[str, Any]], batch_size: int = 32) -> List[List[float]]:
+    async def _make_request(self, inputs: List[Dict], batch_size: int = 32) -> List[List[float]]:
         try:
             all_embeddings = []
             
@@ -28,9 +28,10 @@ class EmbeddingService:
                 
                 async with httpx.AsyncClient() as client:
                     payload = {
-                        "model": "voyage-multi-2",
-                        "input": batch,
-                        "input_type": "document"  # Optimisé pour les documents
+                        "model": "voyage-multi-1",
+                        "inputs": [
+                            {"content": content} for content in batch
+                        ]
                     }
                     
                     try:
@@ -44,11 +45,12 @@ class EmbeddingService:
                         result = response.json()
                         
                         # Format de réponse selon la doc Voyage AI
-                        embeddings = [item["embedding"] for item in result["data"]]
+                        embeddings = result["data"]
                         all_embeddings.extend(embeddings)
                         
                     except httpx.HTTPError as e:
                         logger.error(f"Error during API call: {e.response.text if hasattr(e, 'response') else str(e)}")
+                        logger.error(f"Payload sent: {payload}")
                         raise
             
             return all_embeddings
@@ -58,15 +60,33 @@ class EmbeddingService:
             raise
             
     async def get_multimodal_embeddings(self, documents: List[Dict[str, Any]]) -> List[List[float]]:
-        """Génère des embeddings pour des documents texte avec contexte."""
+        """Génère des embeddings pour des documents texte et images."""
         if not documents:
             return []
             
         formatted_inputs = []
+        current_content = []
+        
         for doc in documents:
             if doc["type"] == "text":
-                # Ajouter directement le texte
-                formatted_inputs.append(doc["text"])
+                # Si on a déjà du contenu, on crée un nouvel input
+                if current_content:
+                    formatted_inputs.append(current_content)
+                    current_content = []
+                
+                # Ajouter le texte comme un nouvel input
+                current_content.append({"text": doc["text"]})
+                formatted_inputs.append(current_content)
+                current_content = []
+            
+            elif doc["type"] == "image" and "image" in doc:
+                current_content.append({"image": {"data": doc["image"]}})
+                if "context" in doc:
+                    current_content.append({"text": doc["context"]})
+
+        # Ajouter le dernier contenu s'il existe
+        if current_content:
+            formatted_inputs.append(current_content)
 
         if not formatted_inputs:
             logger.warning("No valid inputs found for embedding generation")
@@ -74,7 +94,8 @@ class EmbeddingService:
 
         logger.info(f"Generating embeddings for {len(formatted_inputs)} inputs")
         try:
-            return await self._make_request(formatted_inputs, self.batch_size)
+            embeddings = await self._make_request(formatted_inputs, self.batch_size)
+            return [emb["embedding"] for emb in embeddings]
         except Exception as e:
             logger.error(f"Failed to generate embeddings: {str(e)}")
             return []
