@@ -1,5 +1,5 @@
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from ..core.config import settings
@@ -12,27 +12,111 @@ class VectorStore:
             host=settings.QDRANT_HOST,
             port=settings.QDRANT_PORT
         )
-        self._ensure_collection_exists()
-        self._log_collection_status()
+        self.ensure_collection_exists()
+        self.log_collection_status()
     
-    def _log_collection_status(self):
+    def ensure_collection_exists(self):
+        """Crée la collection si elle n'existe pas."""
+        collections = self.client.get_collections()
+        collection_names = [collection.name for collection in collections.collections]
+        
+        if settings.COLLECTION_NAME not in collection_names:
+            self.client.create_collection(
+                collection_name=settings.COLLECTION_NAME,
+                vectors_config=models.VectorParams(
+                    size=settings.VECTOR_SIZE,
+                    distance=models.Distance.COSINE
+                )
+            )
+            logger.info(f"Collection {settings.COLLECTION_NAME} created")
+        else:
+            logger.info(f"Collection {settings.COLLECTION_NAME} exists")
+
+    def log_collection_status(self):
+        """Affiche le contenu de la collection."""
         try:
-            response = self.client.get_collection(settings.COLLECTION_NAME)
-            points_count = len(self.client.scroll(
+            points = self.client.scroll(
                 collection_name=settings.COLLECTION_NAME,
                 limit=100000
-            )[0])
-            
-            logger.info(f"Collection '{settings.COLLECTION_NAME}' contains {points_count} points")
-            logger.info(f"First 3 points sample:")
-            
-            first_points = self.client.scroll(
-                collection_name=settings.COLLECTION_NAME,
-                limit=3
             )[0]
             
-            for point in first_points:
-                logger.info(f"Point ID: {point.id}, Content: {point.payload.get('content', 'No content')}")
-                
+            logger.info(f"Collection '{settings.COLLECTION_NAME}' contains {len(points)} points")
+            
+            if points:
+                logger.info("Sample of first 3 points:")
+                for point in points[:3]:
+                    logger.info(f"ID: {point.id}, Content: {point.payload.get('content', 'No content')[:100]}...")
+                    
         except Exception as e:
             logger.error(f"Error checking collection status: {str(e)}")
+
+    async def store_vectors(self, points: List[List[float]], metadata: List[Dict[str, Any]]) -> bool:
+        """Stocke les vecteurs dans Qdrant."""
+        try:
+            qdrant_points = [
+                models.PointStruct(
+                    id=i,
+                    vector=vector.tolist() if hasattr(vector, 'tolist') else vector,
+                    payload=meta
+                )
+                for i, (vector, meta) in enumerate(zip(points, metadata))
+            ]
+            
+            self.client.upsert(
+                collection_name=settings.COLLECTION_NAME,
+                points=qdrant_points,
+                wait=True
+            )
+            
+            logger.info(f"Stored {len(points)} vectors successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error storing vectors: {str(e)}")
+            return False
+
+    async def search(self, query_vector: List[float], limit: int = 5, score_threshold: float = 0.7) -> List[Dict[str, Any]]:
+        """Recherche les vecteurs les plus similaires."""
+        try:
+            results = self.client.search(
+                collection_name=settings.COLLECTION_NAME,
+                query_vector=query_vector,
+                limit=limit,
+                score_threshold=score_threshold
+            )
+            
+            matches = [
+                {
+                    "score": hit.score,
+                    "content": hit.payload.get("content", ""),
+                    "source": hit.payload.get("filename", ""),
+                    "page": hit.payload.get("page", 0),
+                    "type": hit.payload.get("type", "unknown")
+                }
+                for hit in results
+            ]
+            
+            logger.info(f"Found {len(matches)} matches")
+            return sorted(matches, key=lambda x: x["score"], reverse=True)
+            
+        except Exception as e:
+            logger.error(f"Error during search: {str(e)}")
+            return []
+
+    async def file_exists(self, file_path: str) -> bool:
+        """Vérifie si un fichier est déjà indexé."""
+        try:
+            result = self.client.scroll(
+                collection_name=settings.COLLECTION_NAME,
+                scroll_filter=models.Filter(
+                    must=[models.FieldCondition(
+                        key="filename",
+                        match=models.MatchValue(value=file_path)
+                    )]
+                ),
+                limit=1
+            )
+            return len(result[0]) > 0
+        except Exception as e:
+            logger.error(f"Error checking file existence: {str(e)}")
+            return False
