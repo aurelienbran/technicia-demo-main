@@ -1,6 +1,6 @@
 import httpx
 import logging
-from typing import List, Union, Dict, Any
+from typing import List, Dict, Any
 from ..core.config import settings
 
 logger = logging.getLogger("technicia.embedding")
@@ -8,29 +8,29 @@ logger = logging.getLogger("technicia.embedding")
 class EmbeddingService:
     def __init__(self):
         self.api_key = settings.VOYAGE_API_KEY
-        self.api_url = "https://api.voyageai.com/v1/multimodalembeddings"
+        self.api_url = "https://api.voyageai.com/v1/embeddings"  # Endpoint normal pour le texte
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
-        self.batch_size = 20  # Maximum recommandé par la doc
+        self.batch_size = 20
         logger.info("Embedding service initialized")
 
-    async def _make_request(self, inputs: List[str], batch_size: int = 20) -> List[List[float]]:
+    async def _make_request(self, texts: List[str], batch_size: int = 20) -> List[List[float]]:
         try:
             all_embeddings = []
             
             # Traiter par lots
-            for i in range(0, len(inputs), batch_size):
-                batch = inputs[i:i + batch_size]
-                logger.info(f"Processing batch {i//batch_size + 1}/{(len(inputs) + batch_size - 1)//batch_size}")
+            for i in range(0, len(texts), batch_size):
+                batch = texts[i:i + batch_size]
+                logger.info(f"Processing batch {i//batch_size + 1}/{(len(texts) + batch_size - 1)//batch_size}")
                 
                 async with httpx.AsyncClient() as client:
+                    # Format simple pour l'API embeddings
                     payload = {
-                        "model": "voyage-multimodal-3",
-                        "inputs": [{
-                            "text": text
-                        } for text in batch]
+                        "model": "voyage-2",
+                        "input": batch,
+                        "input_type": "document"
                     }
                     
                     try:
@@ -44,24 +44,18 @@ class EmbeddingService:
                         response.raise_for_status()
                         result = response.json()
                         
-                        # Extraire les embeddings de la réponse
-                        batch_embeddings = []
-                        for item in result.get("data", []):
-                            if "embedding" in item:
-                                batch_embeddings.append(item["embedding"])
+                        # Format de réponse pour l'API embeddings
+                        batch_embeddings = [item["embedding"] for item in result["data"]]
                         all_embeddings.extend(batch_embeddings)
                         
                         # Log des tokens utilisés
                         if "usage" in result:
-                            usage = result["usage"]
-                            logger.info(f"Tokens used - Text: {usage.get('text_tokens', 0)}, "
-                                     f"Total: {usage.get('total_tokens', 0)}")
-                        
+                            logger.info(f"Tokens used: {result['usage']['total_tokens']}")
+                            
                     except httpx.HTTPError as e:
                         logger.error(f"Error during API call: {str(e)}")
                         if hasattr(e, 'response'):
                             logger.error(f"Response content: {e.response.text}")
-                        logger.error(f"Request payload: {payload}")
                         raise
             
             return all_embeddings
@@ -79,7 +73,9 @@ class EmbeddingService:
         texts = []
         for doc in documents:
             if doc["type"] == "text" and "text" in doc:
-                texts.append(doc["text"])
+                text = doc["text"].strip()
+                if text:  # Vérifier que le texte n'est pas vide
+                    texts.append(text)
 
         if not texts:
             logger.warning("No valid text inputs found for embedding generation")
@@ -87,10 +83,7 @@ class EmbeddingService:
 
         logger.info(f"Generating embeddings for {len(texts)} text inputs")
         try:
-            embeddings = await self._make_request(texts, self.batch_size)
-            if not embeddings:
-                logger.error("No embeddings generated from API response")
-            return embeddings
+            return await self._make_request(texts, self.batch_size)
         except Exception as e:
             logger.error(f"Failed to generate embeddings: {str(e)}")
             return []
