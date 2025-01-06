@@ -50,9 +50,13 @@ class IndexingService:
                     "answer": "Désolé, je n'ai pas trouvé d'information pertinente dans la documentation.",
                     "query": query
                 }
-
-            # Générer une réponse avec Claude
-            answer = await self.claude_service.get_response(query, matches)
+            
+            try:
+                # Générer une réponse avec Claude
+                answer = await self.claude_service.get_response(query, matches)
+            except Exception as e:
+                logger.error(f"Error getting Claude response: {str(e)}")
+                answer = "Désolé, je ne peux pas générer une réponse pour le moment."
 
             return {
                 "matches": matches,
