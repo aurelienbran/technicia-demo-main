@@ -4,6 +4,7 @@ import shutil
 import tempfile
 import stat
 import logging
+import time
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from PIL import Image
@@ -13,6 +14,8 @@ from .embedding import EmbeddingService
 
 logger = logging.getLogger("technicia.indexing")
 
+MAX_IMAGE_SIZE = (1920, 1080)  # Résolution maximum pour Voyage AI
+
 class IndexingService:
     def __init__(self):
         self.vector_store = VectorStore()
@@ -21,6 +24,12 @@ class IndexingService:
         self.overlap = 200
         self.max_retries = 3
         self.retry_delay = 1
+
+    def _resize_image_if_needed(self, image: Image.Image) -> Image.Image:
+        """Redimensionne l'image si elle dépasse la taille maximale."""
+        if image.size[0] > MAX_IMAGE_SIZE[0] or image.size[1] > MAX_IMAGE_SIZE[1]:
+            image.thumbnail(MAX_IMAGE_SIZE, Image.Resampling.LANCZOS)
+        return image
 
     def _extract_images_from_page(self, page) -> List[Tuple[Image.Image, str]]:
         """Extrait les images d'une page PDF avec leur contexte."""
@@ -37,11 +46,11 @@ class IndexingService:
                     if base_image:
                         image_bytes = base_image["image"]
                         
-                        # Convertir en PIL Image
+                        # Convertir en PIL Image et redimensionner si nécessaire
                         pil_image = Image.open(io.BytesIO(image_bytes))
+                        pil_image = self._resize_image_if_needed(pil_image)
                         
                         # Récupérer le texte environnant comme contexte
-                        # Utiliser les coordonnées de l'image pour obtenir le texte proche
                         rect = page.get_image_rects(img_info[0])[0]  # Premier rectangle trouvé
                         # Agrandir la zone de recherche de texte
                         extended_rect = fitz.Rect(
