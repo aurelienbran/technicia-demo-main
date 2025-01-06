@@ -4,8 +4,7 @@ import shutil
 import tempfile
 import stat
 import logging
-import win32file
-import win32security
+import time
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from .vector_store import VectorStore
@@ -21,45 +20,48 @@ class IndexingService:
         self.image_processor = ImageProcessor()
         self.chunk_size = 1000
         self.overlap = 200
+        self.max_retries = 3
+        self.retry_delay = 1  # secondes
 
     def _safe_read_file(self, file_path: str) -> Optional[bytes]:
-        """Lit un fichier de manière sécurisée en utilisant l'API Windows."""
-        try:
-            # Obtenir un handle sécurisé au fichier
-            handle = win32file.CreateFile(
-                file_path,
-                win32file.GENERIC_READ,
-                win32file.FILE_SHARE_READ | win32file.FILE_SHARE_WRITE | win32file.FILE_SHARE_DELETE,
-                None,
-                win32file.OPEN_EXISTING,
-                win32file.FILE_ATTRIBUTE_NORMAL,
-                None
-            )
-
+        """Lit un fichier avec plusieurs tentatives en cas d'échec."""
+        temp_path = None
+        for attempt in range(self.max_retries):
             try:
-                # Lire le contenu du fichier
-                data = bytearray()
-                while True:
-                    hr, chunk = win32file.ReadFile(handle, 8192)
-                    if not chunk:
-                        break
-                    data.extend(chunk)
-                return bytes(data)
+                # Créer un dossier temporaire pour la copie
+                temp_dir = tempfile.mkdtemp()
+                temp_path = os.path.join(temp_dir, f"temp_{os.path.basename(file_path)}")
+                
+                # Copier le fichier
+                shutil.copy2(file_path, temp_path)
+                
+                # Lire depuis la copie temporaire
+                with open(temp_path, 'rb') as f:
+                    return f.read()
+                    
+            except IOError as e:
+                if attempt < self.max_retries - 1:
+                    logger.warning(f"Tentative {attempt + 1} échouée, nouvelle tentative dans {self.retry_delay}s...")
+                    time.sleep(self.retry_delay)
+                else:
+                    logger.error(f"Erreur persistante lors de la lecture: {str(e)}")
+                    return None
             finally:
-                handle.Close()
-
-        except Exception as e:
-            logger.error(f"Erreur lors de la lecture du fichier {file_path}: {str(e)}")
-            return None
+                # Nettoyer les fichiers temporaires
+                if temp_path and os.path.exists(os.path.dirname(temp_path)):
+                    try:
+                        shutil.rmtree(os.path.dirname(temp_path))
+                    except Exception as e:
+                        logger.warning(f"Impossible de nettoyer le dossier temporaire: {str(e)}")
 
     async def index_pdf(self, file_path: str) -> bool:
         try:
             logger.info(f"Début indexation: {file_path}")
             
-            # Lecture sécurisée du fichier
+            # Lecture sécurisée du fichier avec plusieurs tentatives
             pdf_bytes = self._safe_read_file(file_path)
             if pdf_bytes is None:
-                logger.error("Impossible de lire le fichier PDF")
+                logger.error("Impossible de lire le fichier PDF après plusieurs tentatives")
                 return False
 
             logger.info(f"Lecture réussie: {len(pdf_bytes)} bytes")
