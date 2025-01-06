@@ -22,7 +22,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(chat.router)
+# Inclure les routes avec le préfixe /api
+app.include_router(chat.router, prefix="/api")
 
 @app.on_event("startup")
 async def startup_event():
@@ -33,10 +34,8 @@ async def startup_event():
     settings.initialize_dirs()
     logger.info(f"Docs directory configured: {settings.DOCS_PATH}")
     
-    # Démarrer le service de surveillance
     watcher_service = WatcherService(settings.DOCS_PATH, indexing_service)
     await watcher_service.start()
-    logger.info("Watcher service started")
 
 @app.on_event("shutdown")
 async def shutdown_event():
