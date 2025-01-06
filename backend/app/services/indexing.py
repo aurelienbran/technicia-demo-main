@@ -159,9 +159,13 @@ class IndexingService:
                         "type": "multimodal"
                     } for idx in range(len(embeddings))]
                     
-                    await self.vector_store.add_texts(contents, metadata, embeddings)
-                    logger.info(f"Indexation réussie")
-                    return True
+                    success = await self.vector_store.store_vectors(embeddings, metadata)
+                    if success:
+                        logger.info(f"Indexation réussie")
+                        return True
+                    else:
+                        logger.error("Echec du stockage des vecteurs")
+                        return False
 
             logger.error("Aucun contenu extrait")
             return False
