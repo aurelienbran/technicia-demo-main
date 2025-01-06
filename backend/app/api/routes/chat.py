@@ -20,61 +20,39 @@ async def query_documents(request: QueryRequest):
             query=request.query,
             limit=request.limit
         )
-        return result
+        if 'error' in result:
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "matches": [],
+                    "error": result["error"]
+                }
+            )
+            
+        # Enrichir les résultats avec le contenu du texte
+        enriched_matches = []
+        for match in result["matches"]:
+            enriched_matches.append({
+                "id": match["id"],
+                "score": match["score"],
+                "content": match["content"],
+                "metadata": match["metadata"],
+                "page": match["page"]
+            })
+            
+        return JSONResponse(
+            status_code=200,
+            content={
+                "matches": enriched_matches,
+                "query": request.query
+            }
+        )
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/index/file", response_model=IndexResponse)
-async def index_file(file: UploadFile = File(...)):
-    if not file.filename.endswith('.pdf'):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported")
-    
-    try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
-            content = await file.read()
-            tmp.write(content)
-            tmp_path = tmp.name
-        
-        try:
-            result = await indexing_service.index_document(tmp_path)
-            if not result.get('metadata'):
-                result['metadata'] = {}
-            if result.get('error') is None:
-                result['error'] = ''
-            return result
-        finally:
-            os.unlink(tmp_path)
-    except Exception as e:
-        logger.error(f"Error indexing file: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.delete("/vectors/{filename}")
-async def delete_vectors(filename: str):
-    try:
-        await indexing_service.vector_store.delete_vectors_by_filename(filename)
-        return {"status": "success", "message": f"Vectors deleted for {filename}"}
-    except Exception as e:
-        logger.error(f"Error deleting vectors: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/health")
-async def health_check():
-    try:
-        collection_info = await indexing_service.vector_store.get_collection_info()
-        return {
-            "status": "healthy",
-            "vector_store": {
-                "status": "connected",
-                "collection": collection_info
-            }
-        }
-    except Exception as e:
-        logger.error(f"Health check failed: {str(e)}")
         return JSONResponse(
             status_code=500,
             content={
-                "status": "unhealthy",
+                "matches": [],
                 "error": str(e)
             }
         )
