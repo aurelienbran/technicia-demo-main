@@ -16,22 +16,29 @@ class EmbeddingService:
         self.batch_size = 20
         logger.info("Embedding service initialized")
 
-    async def _make_request(self, inputs: List[Dict], batch_size: int = 20) -> List[List[float]]:
+    async def _make_request(self, texts: List[str], batch_size: int = 20) -> List[List[float]]:
         try:
             all_embeddings = []
             
             # Traiter par lots
-            for i in range(0, len(inputs), batch_size):
-                batch = inputs[i:i + batch_size]
-                logger.info(f"Processing batch {i//batch_size + 1}/{(len(inputs) + batch_size - 1)//batch_size}")
+            for i in range(0, len(texts), batch_size):
+                batch = texts[i:i + batch_size]
+                logger.info(f"Processing batch {i//batch_size + 1}/{(len(texts) + batch_size - 1)//batch_size}")
+                
+                # Préparer les inputs selon la documentation
+                formatted_inputs = [
+                    {
+                        "content": [
+                            {"text": text}
+                        ]
+                    }
+                    for text in batch
+                ]
                 
                 async with httpx.AsyncClient() as client:
-                    # Format selon la documentation officielle
                     payload = {
                         "model": "voyage-multimodal-3",
-                        "inputs": batch,
-                        "input_type": "document",
-                        "truncation": True
+                        "inputs": formatted_inputs
                     }
                     
                     try:
@@ -46,11 +53,10 @@ class EmbeddingService:
                         result = response.json()
                         
                         # Extraire les embeddings
-                        for item in result.get("data", []):
-                            if "embedding" in item:
-                                all_embeddings.append(item["embedding"])
+                        batch_embeddings = [item["embedding"] for item in result.get("data", [])]
+                        all_embeddings.extend(batch_embeddings)
                         
-                        # Log des tokens et pixels utilisés
+                        # Log des tokens utilisés
                         if "usage" in result:
                             usage = result["usage"]
                             logger.info(
@@ -58,6 +64,7 @@ class EmbeddingService:
                                 f"Image pixels: {usage.get('image_pixels', 0)}, "
                                 f"Total tokens: {usage.get('total_tokens', 0)}"
                             )
+                            
                     except httpx.HTTPError as e:
                         logger.error(f"Error during API call: {str(e)}")
                         if hasattr(e, 'response'):
@@ -72,27 +79,28 @@ class EmbeddingService:
             raise
             
     async def get_multimodal_embeddings(self, documents: List[Dict[str, Any]]) -> List[List[float]]:
-        """Génère des embeddings pour des documents texte et images."""
+        """Génère des embeddings pour des documents texte."""
         if not documents:
             return []
             
-        # Transformer les documents en format compatible avec l'API
-        formatted_inputs = []
+        # Extraire uniquement le texte des documents
+        texts = []
         for doc in documents:
-            if doc["type"] == "text":
-                # Format pour le texte selon la documentation
-                content = [{
-                    "text": doc["text"].strip()
-                }]
-                formatted_inputs.append({"content": content})
+            if doc["type"] == "text" and "text" in doc:
+                text = doc["text"].strip()
+                if text:  # Vérifier que le texte n'est pas vide
+                    texts.append(text)
 
-        if not formatted_inputs:
-            logger.warning("No valid inputs found for embedding generation")
+        if not texts:
+            logger.warning("No valid text inputs found for embedding generation")
             return []
 
-        logger.info(f"Generating embeddings for {len(formatted_inputs)} inputs")
+        logger.info(f"Generating embeddings for {len(texts)} text inputs")
         try:
-            return await self._make_request(formatted_inputs, self.batch_size)
+            embeddings = await self._make_request(texts, self.batch_size)
+            if not embeddings:
+                logger.error("No embeddings generated from API response")
+            return embeddings
         except Exception as e:
             logger.error(f"Failed to generate embeddings: {str(e)}")
             return []
