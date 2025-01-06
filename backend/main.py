@@ -30,7 +30,8 @@ async def startup_event():
     global watcher_service
     logger.info("Starting TechnicIA API...")
     
-    os.makedirs(settings.DOCS_PATH, exist_ok=True)
+    # Initialiser les répertoires avec les bonnes permissions
+    settings.initialize_directories()
     logger.info(f"Docs directory configured: {settings.DOCS_PATH}")
     
     watcher_service = WatcherService(settings.DOCS_PATH, indexing_service)
