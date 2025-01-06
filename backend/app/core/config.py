@@ -1,30 +1,10 @@
 import os
-import stat
-import logging
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
-
-logger = logging.getLogger("technicia.config")
 
 # Load .env from backend directory
 env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env')
 load_dotenv(env_path)
-
-DOCS_PATH = "C:\\TechnicIADocs"
-
-def ensure_directory_permissions(path: str) -> None:
-    """S'assure que le répertoire existe avec les bonnes permissions."""
-    try:
-        os.makedirs(path, exist_ok=True)
-        # Définir des permissions complètes (lecture/écriture/exécution)
-        os.chmod(path, 
-                stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR |  # Propriétaire
-                stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP |  # Groupe
-                stat.S_IROTH | stat.S_IWOTH | stat.S_IXOTH)   # Autres
-        logger.info(f"Directory configured with full permissions: {path}")
-    except Exception as e:
-        logger.error(f"Error configuring directory permissions: {str(e)}")
-        raise
 
 class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str
@@ -44,20 +24,15 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     API_PORT: int = 8000
     API_HOST: str = "0.0.0.0"
-    DOCS_PATH: str = DOCS_PATH
     
-    # Processing
-    CHUNK_SIZE: int = 1000
-    CHUNK_OVERLAP: int = 100
-    STORAGE_PATH: str = "storage/pdfs"
-    INDEX_PATH: str = "storage/index"
+    # Chemins
+    BASE_DIR: str = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    DOCS_PATH: str = os.path.join(BASE_DIR, "docs")
     
-    def initialize_directories(self):
-        """Initialise tous les répertoires nécessaires avec les bonnes permissions."""
-        ensure_directory_permissions(self.DOCS_PATH)
-        ensure_directory_permissions(self.STORAGE_PATH)
-        ensure_directory_permissions(self.INDEX_PATH)
-
+    def initialize_dirs(self):
+        """Initialise les répertoires nécessaires."""
+        os.makedirs(self.DOCS_PATH, exist_ok=True)
+    
     class Config:
         env_file = env_path
         env_file_encoding = 'utf-8'
