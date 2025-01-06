@@ -6,5 +6,5 @@ aiohttp
 qdrant-client
 watchdog
 PyMuPDF
-pywin32
+voyageai
 pydantic-settings
