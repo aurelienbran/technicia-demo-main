@@ -7,6 +7,7 @@ class QueryRequest(BaseModel):
 
 class QueryResponse(BaseModel):
     matches: List[Dict[str, Any]]
+    answer: str
     query: Optional[str] = None
     error: Optional[str] = None
 
