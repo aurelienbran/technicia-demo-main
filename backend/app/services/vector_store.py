@@ -29,6 +29,22 @@ class VectorStore:
             logger.info(f"Collection {settings.COLLECTION_NAME} created")
         else:
             logger.info(f"Collection {settings.COLLECTION_NAME} exists")
+            
+    async def get_collection_info(self):
+        try:
+            info = self.client.get_collection(settings.COLLECTION_NAME)
+            points_count = len(self.client.scroll(
+                collection_name=settings.COLLECTION_NAME, 
+                limit=1
+            )[0])
+            return {
+                "name": settings.COLLECTION_NAME,
+                "vector_size": settings.VECTOR_SIZE,
+                "points_count": points_count
+            }
+        except Exception as e:
+            logger.error(f"Error getting collection info: {str(e)}")
+            raise
 
     async def store_vectors(self, points: List[List[float]], metadata: List[Dict[str, Any]]) -> bool:
         try:
@@ -40,6 +56,11 @@ class VectorStore:
                 )
                 for i, (vector, meta) in enumerate(zip(points, metadata))
             ]
+            
+            # Ajouter les logs
+            logger.debug(f"Storing points: {len(qdrant_points)} vectors")
+            for p in qdrant_points[:2]:  # Log quelques exemples
+                logger.debug(f"Example point - ID: {p.id}, Vector size: {len(p.vector)}, Metadata: {p.payload}")
             
             self.client.upsert(
                 collection_name=settings.COLLECTION_NAME,
@@ -56,12 +77,24 @@ class VectorStore:
 
     async def search(self, query_vector: List[float], limit: int = 5, score_threshold: float = 0.7) -> List[Dict[str, Any]]:
         try:
+            # Log debug info
+            logger.debug(f"Searching with vector size: {len(query_vector)}")
+            
+            # Vérifier le contenu de la collection
+            info = await self.get_collection_info()
+            logger.debug(f"Collection info before search: {info}")
+            
             results = self.client.search(
                 collection_name=settings.COLLECTION_NAME,
                 query_vector=query_vector,
                 limit=limit,
                 score_threshold=score_threshold
             )
+            
+            # Log les résultats
+            logger.debug(f"Search returned {len(results)} results")
+            for r in results[:2]:  # Log quelques exemples
+                logger.debug(f"Example result - Score: {r.score}, Payload: {r.payload}")
             
             matches = [
                 {
