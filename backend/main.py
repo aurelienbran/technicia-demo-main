@@ -5,6 +5,9 @@ from app.api.routes import chat
 from app.core.config import settings
 from app.services.watcher import WatcherService
 from app.services.indexing import IndexingService
+from app.services.storage import StorageService
+from app.services.embedding import EmbeddingService
+from app.services.vector_store import VectorStore
 import logging
 
 logger = logging.getLogger("technicia.main")
@@ -14,8 +17,11 @@ app = FastAPI(title="TechnicIA API")
 # Configuration du niveau de logging
 logging.basicConfig(level=logging.INFO)
 
-# Services
-indexing_service = IndexingService()
+# Initialisation des services
+storage_service = StorageService(settings.get_docs_path())
+embedding_service = EmbeddingService()
+vector_store = VectorStore()
+indexing_service = IndexingService(embedding_service, vector_store, storage_service)
 watcher_service = None
 
 app.add_middleware(
@@ -33,13 +39,16 @@ async def startup_event():
     global watcher_service
     logger.info("Starting TechnicIA API...")
     
-    # Configurer le dossier docs
-    docs_path = os.path.join(os.path.dirname(__file__), "docs")
-    os.makedirs(docs_path, exist_ok=True)
+    # Configuration du dossier des documents
+    docs_path = settings.get_docs_path()
     logger.info(f"Docs directory configured: {docs_path}")
     
-    # Démarrer le service de surveillance
-    watcher_service = WatcherService(docs_path, indexing_service)
+    # Vérification des permissions du dossier
+    perms = storage_service.check_permissions(docs_path)
+    logger.info(f"Directory permissions: {perms}")
+    
+    # Démarrage du service de surveillance
+    watcher_service = WatcherService(str(docs_path), indexing_service)
     await watcher_service.start()
     logger.info("Watcher service started")
 
