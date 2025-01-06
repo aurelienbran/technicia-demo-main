@@ -15,7 +15,6 @@ class VectorStore:
         self._ensure_collection_exists()
         
     def _ensure_collection_exists(self):
-        """Vérifie si la collection existe, la crée si nécessaire."""
         collections = self.client.get_collections()
         collection_names = [collection.name for collection in collections.collections]
         
@@ -32,17 +31,7 @@ class VectorStore:
             logger.info(f"Collection {settings.COLLECTION_NAME} exists")
 
     async def store_vectors(self, points: List[List[float]], metadata: List[Dict[str, Any]]) -> bool:
-        """Stocke les vecteurs et leurs métadonnées dans Qdrant.
-        
-        Args:
-            points: Liste de vecteurs d'embeddings
-            metadata: Liste de métadonnées associées
-            
-        Returns:
-            bool: True si le stockage a réussi
-        """
         try:
-            # Préparer les points avec leurs IDs et métadonnées
             qdrant_points = [
                 models.PointStruct(
                     id=i,
@@ -52,11 +41,10 @@ class VectorStore:
                 for i, (vector, meta) in enumerate(zip(points, metadata))
             ]
             
-            # Utiliser upsert pour ajouter ou mettre à jour les points
             self.client.upsert(
                 collection_name=settings.COLLECTION_NAME,
                 points=qdrant_points,
-                wait=True  # Attendre la confirmation
+                wait=True
             )
             
             logger.info(f"Stored {len(points)} vectors successfully")
@@ -66,8 +54,34 @@ class VectorStore:
             logger.error(f"Error storing vectors: {str(e)}")
             return False
 
+    async def search(self, query_vector: List[float], limit: int = 5, score_threshold: float = 0.7) -> List[Dict[str, Any]]:
+        try:
+            results = self.client.search(
+                collection_name=settings.COLLECTION_NAME,
+                query_vector=query_vector,
+                limit=limit,
+                score_threshold=score_threshold
+            )
+            
+            matches = [
+                {
+                    "score": hit.score,
+                    "metadata": hit.payload,
+                    "content": hit.payload.get("content", "") if hit.payload else "",
+                    "id": hit.id,
+                    "source": hit.payload.get("filename", "") if hit.payload else "",
+                    "page": hit.payload.get("page", 0) if hit.payload else 0
+                }
+                for hit in results
+            ]
+            
+            return sorted(matches, key=lambda x: x["score"], reverse=True)
+            
+        except Exception as e:
+            logger.error(f"Error during search: {str(e)}")
+            return []
+
     async def file_exists(self, file_path: str) -> bool:
-        """Vérifie si un fichier a déjà été indexé."""
         try:
             result = self.client.scroll(
                 collection_name=settings.COLLECTION_NAME,
